@@ -1,7 +1,7 @@
 // API Configuration
 // We use relative paths in both dev (via Vite proxy) and prod (via Vercel rewrites).
 // This avoids issues where the frontend tries to hit localhost in production.
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const API_BASE_URL = import.meta.env.PROD ? '' : (import.meta.env.VITE_API_URL || '');
 
 export function getAssetUrl(path: string | null): string | undefined {
   if (!path) return undefined;
