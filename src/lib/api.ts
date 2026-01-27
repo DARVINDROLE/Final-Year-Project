@@ -1,7 +1,9 @@
 // API Configuration
-// For Vercel, we want relative paths (empty string) so it calls /api/... on the same domain.
-// For local dev, we use VITE_API_URL.
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+// If in Production (Vercel), use relative path (empty string) to leverage rewrites.
+// If in Development, use the env var or default to localhost.
+const API_BASE_URL = import.meta.env.PROD 
+  ? '' 
+  : (import.meta.env.VITE_API_URL || 'http://localhost:8000');
 
 export function getAssetUrl(path: string | null): string | undefined {
   if (!path) return undefined;
