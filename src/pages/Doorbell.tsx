@@ -4,7 +4,7 @@ import { RingButton } from '@/components/RingButton';
 import { StatusIndicator } from '@/components/StatusIndicator';
 import { TranscriptDisplay } from '@/components/TranscriptDisplay';
 import { ringDoorbell, getAIReply, speakText } from '@/lib/api';
-import { Home, Mic, MicOff } from 'lucide-react';
+import { Home, Mic, MicOff, Camera, CameraOff } from 'lucide-react';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 
 type DoorbellState = 'idle' | 'ringing' | 'greeting' | 'awaiting_input' | 'processing' | 'speaking';
@@ -22,7 +22,32 @@ export default function Doorbell() {
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [manualInput, setManualInput] = useState('');
   
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  
   const webcamRef = useRef<Webcam>(null);
+
+  const handleCameraError = useCallback((error: string | DOMException) => {
+    console.error('Camera error:', error);
+    setCameraError('Camera access denied. Please enable camera permissions.');
+    setIsCameraReady(false);
+  }, []);
+
+  const handleCameraSuccess = useCallback(() => {
+    console.log('Camera started successfully');
+    setIsCameraReady(true);
+    setCameraError(null);
+  }, []);
+
+  const requestCameraAccess = async () => {
+    try {
+      setCameraError(null);
+      await navigator.mediaDevices.getUserMedia({ video: true });
+      // The Webcam component will handle the rest via onUserMedia
+    } catch (err) {
+      handleCameraError(err as DOMException);
+    }
+  };
 
   const handleSendMessage = useCallback(async (message: string) => {
     if (!message.trim()) return;
@@ -101,8 +126,10 @@ export default function Doorbell() {
     try {
       // Capture image from webcam if available
       let imageSrc: string | null = null;
-      if (webcamRef.current) {
+      if (webcamRef.current && isCameraReady) {
         imageSrc = webcamRef.current.getScreenshot();
+      } else {
+        console.warn("Camera not ready, sending without image");
       }
 
       // Ring the doorbell and get greeting (passing the image)
@@ -133,7 +160,7 @@ export default function Doorbell() {
       setState('idle');
       setStatusMessage('Connection failed. Please try again.');
     }
-  }, []);
+  }, [isCameraReady]);
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,6 +204,8 @@ export default function Doorbell() {
           screenshotFormat="image/jpeg"
           width={640}
           height={480}
+          onUserMedia={handleCameraSuccess}
+          onUserMediaError={handleCameraError}
         />
       </div>
 
@@ -187,9 +216,35 @@ export default function Doorbell() {
           KANDELL RESIDENCE
         </span>
       </div>
+      
+      {/* Camera Status (Top Right) */}
+      <div className="absolute top-6 right-6">
+        {!isCameraReady ? (
+          <button 
+            onClick={requestCameraAccess}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-500 text-xs font-medium hover:bg-red-500/20 transition-colors"
+          >
+            <CameraOff className="w-4 h-4" />
+            <span>Enable Camera</span>
+          </button>
+        ) : (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/30 text-green-500 text-xs font-medium">
+            <Camera className="w-4 h-4" />
+            <span>Camera Active</span>
+          </div>
+        )}
+      </div>
 
       {/* Main Content */}
       <div className="flex flex-col items-center gap-8 w-full max-w-lg">
+        
+        {/* Camera Error Message */}
+        {cameraError && (
+          <div className="w-full text-center p-2 mb-4 text-xs text-red-400 bg-red-950/30 rounded border border-red-900/50">
+            {cameraError}
+          </div>
+        )}
+
         {/* Ring Button */}
         <div className="mb-8">
           <RingButton 
