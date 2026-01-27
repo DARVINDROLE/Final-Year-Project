@@ -144,19 +144,14 @@ async def health_check():
 
 
 @app.post("/api/ring")
-
-async def ring(request: CaptureRequest = CaptureRequest(image=None)):
-
+async def ring(request: CaptureRequest):
     if not doorbell:
-
         raise HTTPException(status_code=503, detail="Doorbell service not initialized (Check Server Logs)")
-
         
-
     session_id = f"visitor_{uuid.uuid4().hex[:8]}"
-
-    image_url = "/placeholder.svg" 
-
+    # Use the provided image or fallback to placeholder
+    image_url = request.image or "/placeholder.svg"
+    
     greeting = doorbell.get_response("The doorbell button was pressed.", session_id, image_url=image_url)
 
     return {"sessionId": session_id, "greeting": greeting, "imageUrl": image_url}
