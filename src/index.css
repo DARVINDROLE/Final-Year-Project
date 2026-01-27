@@ -1,0 +1,261 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind utilities;
+@tailwind base;
+@tailwind components;
+
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 187 85% 43%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 20% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 20% 94%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 38 92% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 69% 31%;
+    --success-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 187 85% 43%;
+
+    --radius: 0.75rem;
+
+    --doorbell-bg: 222 47% 8%;
+    --doorbell-surface: 222 40% 12%;
+    --doorbell-glow: 187 85% 53%;
+    --doorbell-ring: 38 92% 50%;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 222 47% 8%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 40% 12%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 40% 12%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 187 85% 53%;
+    --primary-foreground: 222 47% 8%;
+
+    --secondary: 222 35% 18%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 222 35% 18%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 38 92% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 152 69% 41%;
+    --success-foreground: 0 0% 100%;
+
+    --border: 222 35% 20%;
+    --input: 222 35% 20%;
+    --ring: 187 85% 53%;
+
+    --sidebar-background: 222 40% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 187 85% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 35% 15%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 222 35% 20%;
+    --sidebar-ring: 187 85% 53%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+}
+
+@layer utilities {
+  .doorbell-gradient {
+    background: radial-gradient(ellipse at center, hsl(var(--doorbell-surface)) 0%, hsl(var(--doorbell-bg)) 100%);
+  }
+
+  .ring-glow {
+    box-shadow: 
+      0 0 20px hsl(var(--doorbell-glow) / 0.3),
+      0 0 40px hsl(var(--doorbell-glow) / 0.2),
+      0 0 60px hsl(var(--doorbell-glow) / 0.1);
+  }
+
+  .ring-glow-active {
+    box-shadow: 
+      0 0 30px hsl(var(--doorbell-ring) / 0.5),
+      0 0 60px hsl(var(--doorbell-ring) / 0.3),
+      0 0 100px hsl(var(--doorbell-ring) / 0.2);
+  }
+
+  .pulse-ring {
+    animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .status-pulse {
+    animation: status-pulse 1.5s ease-in-out infinite;
+  }
+
+  .slide-up {
+    animation: slide-up 0.5s ease-out;
+  }
+
+  .fade-in {
+    animation: fade-in 0.3s ease-out;
+  }
+}
+
+@keyframes pulse-ring {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.02);
+  }
+}
+
+@keyframes status-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Visitor Doorbell Styles */
+.doorbell-page {
+  background: linear-gradient(135deg, hsl(222 47% 6%) 0%, hsl(222 47% 12%) 50%, hsl(222 47% 8%) 100%);
+  min-height: 100vh;
+}
+
+/* Ring Button Animation */
+.ring-button {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ring-button:hover {
+  transform: scale(1.05);
+}
+
+.ring-button:active {
+  transform: scale(0.98);
+}
+
+/* Status Indicator */
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.status-dot.listening {
+  background: hsl(var(--primary));
+  animation: status-pulse 1s ease-in-out infinite;
+}
+
+.status-dot.processing {
+  background: hsl(var(--accent));
+  animation: status-pulse 0.5s ease-in-out infinite;
+}
+
+.status-dot.speaking {
+  background: hsl(var(--success));
+  animation: status-pulse 0.8s ease-in-out infinite;
+}
+
+.status-dot.idle {
+  background: hsl(var(--muted-foreground));
+}
+
+/* Dashboard Cards */
+.visitor-card {
+  @apply bg-card rounded-xl border border-border shadow-sm transition-all duration-300;
+}
+
+.visitor-card:hover {
+  @apply shadow-md border-primary/20;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
