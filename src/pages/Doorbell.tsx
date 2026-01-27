@@ -29,7 +29,15 @@ export default function Doorbell() {
 
   const handleCameraError = useCallback((error: string | DOMException) => {
     console.error('Camera error:', error);
-    setCameraError('Camera access denied. Please enable camera permissions.');
+    const errorName = (error as DOMException).name || (error as any).toString();
+    
+    if (errorName === 'NotFoundError' || errorName.includes('not found')) {
+      setCameraError('No camera found. You can still ring the doorbell.');
+    } else if (errorName === 'NotAllowedError' || errorName.includes('permission')) {
+      setCameraError('Camera access denied. Please enable camera permissions.');
+    } else {
+      setCameraError('Camera error. Ringing will proceed without video.');
+    }
     setIsCameraReady(false);
   }, []);
 
@@ -194,6 +202,8 @@ export default function Doorbell() {
     }
   };
 
+  const isNotFoundError = cameraError && cameraError.includes('No camera found');
+
   return (
     <div className="doorbell-page min-h-screen flex flex-col items-center justify-center p-6">
       {/* Hidden Webcam for Capture */}
@@ -221,11 +231,15 @@ export default function Doorbell() {
       <div className="absolute top-6 right-6">
         {!isCameraReady ? (
           <button 
-            onClick={requestCameraAccess}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-500 text-xs font-medium hover:bg-red-500/20 transition-colors"
+            onClick={isNotFoundError ? undefined : requestCameraAccess}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              isNotFoundError 
+                ? 'bg-amber-500/10 border border-amber-500/30 text-amber-500 cursor-default' 
+                : 'bg-red-500/10 border border-red-500/30 text-red-500 hover:bg-red-500/20'
+            }`}
           >
             <CameraOff className="w-4 h-4" />
-            <span>Enable Camera</span>
+            <span>{isNotFoundError ? 'No Camera' : 'Enable Camera'}</span>
           </button>
         ) : (
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/30 text-green-500 text-xs font-medium">
@@ -240,7 +254,11 @@ export default function Doorbell() {
         
         {/* Camera Error Message */}
         {cameraError && (
-          <div className="w-full text-center p-2 mb-4 text-xs text-red-400 bg-red-950/30 rounded border border-red-900/50">
+          <div className={`w-full text-center p-2 mb-4 text-xs rounded border ${
+            isNotFoundError 
+              ? 'text-amber-400 bg-amber-950/30 border-amber-900/50' 
+              : 'text-red-400 bg-red-950/30 border-red-900/50'
+          }`}>
             {cameraError}
           </div>
         )}
