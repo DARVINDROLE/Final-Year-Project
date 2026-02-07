@@ -163,7 +163,7 @@ async def ring(request: CaptureRequest):
     # Use the provided image or fallback to placeholder
     image_url = request.image or "/placeholder.svg"
     
-    greeting = doorbell.get_response("The doorbell button was pressed.", session_id, image_url=image_url)
+    greeting = doorbell.get_response("The doorbell button was pressed. Greet the visitor in Hindi.", session_id, image_url=image_url)
 
     return {"sessionId": session_id, "greeting": greeting, "imageUrl": image_url}
 

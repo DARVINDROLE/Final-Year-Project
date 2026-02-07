@@ -103,6 +103,14 @@ export async function speakText(text: string): Promise<void> {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 1.0; 
       utterance.pitch = 1.0;
+      utterance.lang = 'hi-IN';
+
+      // Attempt to find a Hindi voice
+      const voices = speechSynthesis.getVoices();
+      const hindiVoice = voices.find(v => v.lang.includes('hi') || v.name.includes('Hindi'));
+      if (hindiVoice) {
+        utterance.voice = hindiVoice;
+      }
       
       utterance.onend = () => {
         resolve();
