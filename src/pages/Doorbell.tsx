@@ -4,7 +4,7 @@ import { RingButton } from '@/components/RingButton';
 import { StatusIndicator } from '@/components/StatusIndicator';
 import { TranscriptDisplay } from '@/components/TranscriptDisplay';
 import { ringDoorbell, getAIReply, speakText } from '@/lib/api';
-import { Home, Mic, MicOff, Camera, CameraOff } from 'lucide-react';
+import { Home, Mic, MicOff, Camera, CameraOff, Maximize, Minimize } from 'lucide-react';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 
 type DoorbellState = 'idle' | 'ringing' | 'greeting' | 'awaiting_input' | 'processing' | 'speaking';
@@ -24,8 +24,33 @@ export default function Doorbell() {
   
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   
   const webcamRef = useRef<Webcam>(null);
+
+  const toggleFullScreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().then(() => {
+        setIsFullscreen(true);
+      }).catch((err) => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+      });
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const handleCameraError = useCallback((error: string | DOMException) => {
     console.error('Camera error:', error);
@@ -228,7 +253,15 @@ export default function Doorbell() {
       </div>
       
       {/* Camera Status (Top Right) */}
-      <div className="absolute top-6 right-6">
+      <div className="absolute top-6 right-6 flex gap-3">
+        <button
+          onClick={toggleFullScreen}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-doorbell-surface border border-doorbell-glow/30 text-doorbell-glow text-xs font-medium hover:bg-doorbell-glow/10 transition-colors"
+        >
+          {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+          <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
+        </button>
+
         {!isCameraReady ? (
           <button 
             onClick={isNotFoundError ? undefined : requestCameraAccess}
