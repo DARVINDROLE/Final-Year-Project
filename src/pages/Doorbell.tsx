@@ -71,7 +71,7 @@ export default function Doorbell() {
 
     // Process with AI
     setState('processing');
-    setStatusMessage('Thinking...');
+    setStatusMessage('सोच रहा हूँ...');
 
     try {
       const { reply } = await getAIReply(sessionId || '', message);
@@ -86,17 +86,17 @@ export default function Doorbell() {
 
       // Speak the reply
       setState('speaking');
-      setStatusMessage('Speaking...');
+      setStatusMessage('बोल रहा हूँ...');
       await speakText(reply);
 
       // Go back to waiting for input
       setState('awaiting_input');
-      setStatusMessage('Listening...');
+      setStatusMessage('सुन रहा हूँ...');
 
     } catch (error) {
       console.error('AI reply error:', error);
       setState('idle');
-      setStatusMessage('Error processing your message');
+      setStatusMessage('संदेश को संसाधित करने में त्रुटि');
     }
   }, [sessionId]);
 
@@ -122,13 +122,13 @@ export default function Doorbell() {
   // Update status message with speech error if present
   useEffect(() => {
     if (speechError) {
-      setStatusMessage(`Mic Error: ${speechError}`);
+      setStatusMessage(`माइक त्रुटि: ${speechError}`);
     }
   }, [speechError]);
 
   const handleRing = useCallback(async () => {
     setState('ringing');
-    setStatusMessage('Connecting...');
+    setStatusMessage('कनेक्ट हो रहा है...');
     setTranscript([]);
 
     try {
@@ -156,17 +156,17 @@ export default function Doorbell() {
       setTranscript([doorbellEntry]);
       
       setState('speaking');
-      setStatusMessage('Speaking...');
+      setStatusMessage('बोल रहा हूँ...');
       await speakText(greeting);
 
       // Start waiting for input after greeting
       setState('awaiting_input');
-      setStatusMessage('Listening...');
+      setStatusMessage('सुन रहा हूँ...');
 
     } catch (error) {
       console.error('Ring error:', error);
       setState('idle');
-      setStatusMessage('Connection failed. Please try again.');
+      setStatusMessage('कनेक्शन विफल। कृपया पुनः प्रयास करें।');
     }
   }, [isCameraReady]);
 
@@ -223,7 +223,7 @@ export default function Doorbell() {
       <div className="absolute top-6 left-6 flex items-center gap-2">
         <Home className="w-5 h-5 text-doorbell-glow/60" />
         <span className="text-doorbell-glow/60 text-sm font-medium tracking-wide">
-          KANDELL RESIDENCE
+          कंडेल निवास
         </span>
       </div>
       
@@ -239,12 +239,12 @@ export default function Doorbell() {
             }`}
           >
             <CameraOff className="w-4 h-4" />
-            <span>{isNotFoundError ? 'No Camera' : 'Enable Camera'}</span>
+            <span>{isNotFoundError ? 'कैमरा नहीं मिला' : 'कैमरा सक्षम करें'}</span>
           </button>
         ) : (
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/30 text-green-500 text-xs font-medium">
             <Camera className="w-4 h-4" />
-            <span>Camera Active</span>
+            <span>कैमरा सक्रिय</span>
           </div>
         )}
       </div>
@@ -296,10 +296,10 @@ export default function Doorbell() {
               </div>
               <div className="flex flex-col">
                 <span className="text-doorbell-glow font-medium">
-                  {isListening ? 'I\'m listening...' : 'Microphone off'}
+                  {isListening ? 'मैं सुन रहा हूँ...' : 'माइक्रोफोन बंद'}
                 </span>
                 <span className="text-doorbell-glow/40 text-xs">
-                  Speak now or use the text box below
+                  अभी बोलें या नीचे दिए गए टेक्स्ट बॉक्स का उपयोग करें
                 </span>
               </div>
             </div>
@@ -309,7 +309,7 @@ export default function Doorbell() {
                 onClick={handleEndConversation}
                 className="px-6 py-2 bg-doorbell-surface text-doorbell-glow border border-doorbell-glow/30 rounded-full text-sm font-medium hover:bg-doorbell-glow/10 transition-colors"
               >
-                End Conversation
+                बातचीत समाप्त करें
               </button>
             </div>
 
@@ -318,7 +318,7 @@ export default function Doorbell() {
                 type="text"
                 value={manualInput}
                 onChange={(e) => setManualInput(e.target.value)}
-                placeholder="Or type your message..."
+                placeholder="या अपना संदेश टाइप करें..."
                 className="flex-1 bg-doorbell-surface border border-doorbell-glow/30 rounded-lg px-4 py-2 text-foreground focus:outline-none focus:border-doorbell-glow/60 text-sm"
               />
               <button
@@ -326,7 +326,7 @@ export default function Doorbell() {
                 disabled={!manualInput.trim()}
                 className="bg-doorbell-glow/20 text-doorbell-glow border border-doorbell-glow/30 rounded-lg px-4 py-2 hover:bg-doorbell-glow/30 disabled:opacity-50 text-sm"
               >
-                Send
+                भेजें
               </button>
             </form>
           </div>
@@ -336,7 +336,7 @@ export default function Doorbell() {
       {/* Footer */}
       <div className="absolute bottom-6 text-center">
         <p className="text-doorbell-glow/40 text-xs">
-          Smart Doorbell System • Voice Enabled
+          स्मार्ट डोरबेल सिस्टम • वॉइस सक्षम
         </p>
       </div>
     </div>
