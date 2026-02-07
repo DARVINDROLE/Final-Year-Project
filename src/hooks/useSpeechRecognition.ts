@@ -22,7 +22,7 @@ export const useSpeechRecognition = (options: UseSpeechRecognitionOptions = {}) 
     const recognition = new SpeechRecognition();
     recognition.continuous = options.continuous || false;
     recognition.interimResults = true;
-    recognition.lang = 'hi-IN';
+    recognition.lang = 'en-US';
 
     recognition.onstart = () => {
       setIsListening(true);

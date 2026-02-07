@@ -96,71 +96,25 @@ export async function getAIReply(
 export async function speakText(text: string): Promise<void> {
   // We use browser SpeechSynthesis API exclusively now, as Vercel backend cannot play audio.
   if ('speechSynthesis' in window) {
-    // Helper to get voices reliably with timeout
-    const getVoices = (): Promise<SpeechSynthesisVoice[]> => {
-      return new Promise((resolve) => {
-        let voices = speechSynthesis.getVoices();
-        if (voices.length > 0) {
-          resolve(voices);
-          return;
-        }
-        
-        // Timeout after 1 second to avoid hanging
-        const timeoutId = setTimeout(() => {
-            console.warn("Voice loading timed out, proceeding with default.");
-            resolve([]);
-        }, 1000);
+    return new Promise((resolve) => {
+      // Cancel any ongoing speech
+      speechSynthesis.cancel();
 
-        speechSynthesis.onvoiceschanged = () => {
-          clearTimeout(timeoutId);
-          voices = speechSynthesis.getVoices();
-          resolve(voices);
-        };
-      });
-    };
-
-    try {
-      const voices = await getVoices();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0; 
+      utterance.pitch = 1.0;
       
-      return new Promise((resolve) => {
-        // Cancel any ongoing speech
-        speechSynthesis.cancel();
+      utterance.onend = () => {
+        resolve();
+      };
+      
+      utterance.onerror = (e) => {
+        console.error('Browser TTS error:', e);
+        resolve(); // Resolve anyway so the app doesn't hang
+      };
 
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.9; 
-        utterance.pitch = 1.0;
-        utterance.lang = 'hi-IN';
-
-        // Attempt to find a Hindi voice
-        if (voices.length > 0) {
-            const hindiVoice = voices.find(v => v.lang === 'hi-IN' || v.lang === 'hi') || 
-                               voices.find(v => v.lang.includes('hi'));
-            
-            if (hindiVoice) {
-              console.log(`Using Hindi voice: ${hindiVoice.name}`);
-              utterance.voice = hindiVoice;
-            } else {
-              console.warn("No specific Hindi voice found. Using system default with 'hi-IN' locale.");
-            }
-        }
-        
-        utterance.onend = () => {
-          console.log("Speech finished");
-          resolve();
-        };
-        
-        utterance.onerror = (e) => {
-          console.error('Browser TTS error:', e);
-          resolve(); // Resolve anyway so the app doesn't hang
-        };
-
-        console.log(`Speaking: "${text}"`);
-        speechSynthesis.speak(utterance);
-      });
-    } catch (e) {
-      console.error("Failed to init TTS:", e);
-      return Promise.resolve();
-    }
+      speechSynthesis.speak(utterance);
+    });
   } else {
     console.warn("Browser does not support SpeechSynthesis");
     return Promise.resolve();
