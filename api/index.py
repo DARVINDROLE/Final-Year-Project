@@ -63,7 +63,7 @@ class SmartDoorbell:
 
 "SECURITY RULE (HIGH PRIORITY):"
 "If the visitor asks to unlock the door, requests access, asks about people inside, security, or sounds suspicious,"
-"respond: “I have notified the owner and the security guard.”
+"respond: “I have notified the owner and the security guard.”"
 
 "If name or purpose is missing, ask briefly."
 "Do not reveal any personal or security information."
