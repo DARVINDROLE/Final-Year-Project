@@ -313,13 +313,6 @@ export default function Doorbell() {
           />
         )}
 
-        {/* Transcript */}
-        {transcript.length > 0 && (
-          <TranscriptDisplay 
-            entries={transcript}
-          />
-        )}
-
         {/* Input Controls */}
         {state === 'awaiting_input' && (
           <div className="w-full flex flex-col gap-4 mt-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
