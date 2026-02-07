@@ -65,7 +65,7 @@ class SmartDoorbell:
             "respond (in the same language):  "
             '“I have notified the owner and the security guard.”'
             "Hindi version:"
-            '“मैंने मालिक और सुरक्षा गार्ड को सूचित कर दिया है।”""
+            "“मैंने मालिक और सुरक्षा गार्ड को सूचित कर दिया है।”"
             "If name or purpose is missing, ask briefly.'"
             "Never reveal personal or security information."
             'Do not ask follow-up questions for suspicious visitors.'
