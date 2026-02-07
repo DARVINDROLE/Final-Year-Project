@@ -96,7 +96,7 @@ export async function getAIReply(
 export async function speakText(text: string): Promise<void> {
   // We use browser SpeechSynthesis API exclusively now, as Vercel backend cannot play audio.
   if ('speechSynthesis' in window) {
-    // Helper to get voices reliably (Chrome needs waiting for onvoiceschanged)
+    // Helper to get voices reliably with timeout
     const getVoices = (): Promise<SpeechSynthesisVoice[]> => {
       return new Promise((resolve) => {
         let voices = speechSynthesis.getVoices();
@@ -104,7 +104,15 @@ export async function speakText(text: string): Promise<void> {
           resolve(voices);
           return;
         }
+        
+        // Timeout after 1 second to avoid hanging
+        const timeoutId = setTimeout(() => {
+            console.warn("Voice loading timed out, proceeding with default.");
+            resolve([]);
+        }, 1000);
+
         speechSynthesis.onvoiceschanged = () => {
+          clearTimeout(timeoutId);
           voices = speechSynthesis.getVoices();
           resolve(voices);
         };
@@ -123,18 +131,21 @@ export async function speakText(text: string): Promise<void> {
         utterance.pitch = 1.0;
         utterance.lang = 'hi-IN';
 
-        // Attempt to find a Hindi voice with better fallback logic
-        const hindiVoice = voices.find(v => v.lang === 'hi-IN' || v.lang === 'hi') || 
-                           voices.find(v => v.lang.includes('hi'));
-        
-        if (hindiVoice) {
-          console.log(`Using Hindi voice: ${hindiVoice.name}`);
-          utterance.voice = hindiVoice;
-        } else {
-          console.warn("No specific Hindi voice found. Using system default with 'hi-IN' locale.");
+        // Attempt to find a Hindi voice
+        if (voices.length > 0) {
+            const hindiVoice = voices.find(v => v.lang === 'hi-IN' || v.lang === 'hi') || 
+                               voices.find(v => v.lang.includes('hi'));
+            
+            if (hindiVoice) {
+              console.log(`Using Hindi voice: ${hindiVoice.name}`);
+              utterance.voice = hindiVoice;
+            } else {
+              console.warn("No specific Hindi voice found. Using system default with 'hi-IN' locale.");
+            }
         }
         
         utterance.onend = () => {
+          console.log("Speech finished");
           resolve();
         };
         
@@ -143,10 +154,11 @@ export async function speakText(text: string): Promise<void> {
           resolve(); // Resolve anyway so the app doesn't hang
         };
 
+        console.log(`Speaking: "${text}"`);
         speechSynthesis.speak(utterance);
       });
     } catch (e) {
-      console.error("Failed to load voices:", e);
+      console.error("Failed to init TTS:", e);
       return Promise.resolve();
     }
   } else {
