@@ -88,7 +88,7 @@ class SmartDoorbell:
             return response.content
         except Exception as e:
             print(f"LLM Error: {e}")
-            return "I am currently unable to process your request. Please try again."
+            return "I am currently unable to process your request. Please try again later "
 
     def _update_logs(self, session_id: str, visitor_msg: str, ai_reply: str, image_url: Optional[str] = None):
         log_entry = next((l for l in self.logs if l['id'] == session_id), None)
