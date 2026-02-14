@@ -1,0 +1,102 @@
+# Smart Doorbell — Decision Policy Configuration
+# ================================================
+# This file defines the business rules evaluated by the Decision Agent.
+# Rules are evaluated in priority order (top → bottom). First match wins.
+# Edit thresholds and actions here without touching agent code.
+#
+# Supported final_action values:
+#   escalate     – alert owner + security, play security reply
+#   auto_reply   – play TTS reply, no owner notification
+#   notify_owner – send notification to owner, no TTS
+#   ignore       – log only, no action
+#
+# Owner preferences (loaded from DB in future):
+#   auto_reply_enabled: true
+#   vacation_mode: false
+
+# ─────────────────────────────────────────
+# Global thresholds
+# ─────────────────────────────────────────
+thresholds:
+  escalate_risk: 0.7       # risk_score >= this → escalate
+  auto_reply_max_risk: 0.4 # risk_score < this → auto_reply allowed
+  night_escalate_risk: 0.5 # used when night_mode triggers (future)
+
+# ─────────────────────────────────────────
+# Owner defaults (overridable per-device)
+# ─────────────────────────────────────────
+owner_defaults:
+  auto_reply_enabled: true
+  vacation_mode: false
+  escalation_contacts:
+    - type: owner
+      priority: high
+    - type: watchman
+      priority: normal
+
+# ─────────────────────────────────────────
+# Decision rules — evaluated top-to-bottom
+# ─────────────────────────────────────────
+rules:
+  # Rule 1: Weapon detected → always escalate (highest priority)
+  - name: weapon_escalation
+    condition: "weapon_detected == true"
+    action: escalate
+    dispatch:
+      tts: true
+      notify_owner: true
+      notify_watchman: true
+    reason: "Weapon detected — mandatory escalation"
+
+  # Rule 2: Intelligence flagged escalation or high risk
+  - name: high_risk_escalation
+    condition: "escalation_required == true or risk_score >= {escalate_risk}"
+    action: escalate
+    dispatch:
+      tts: true
+      notify_owner: true
+    reason: "High risk or escalation flag set"
+
+  # Rule 3: Anti-spoof trigger
+  - name: spoof_escalation
+    condition: "anti_spoof_score >= 0.6"
+    action: escalate
+    dispatch:
+      tts: true
+      notify_owner: true
+    reason: "Anti-spoof score indicates possible spoofing"
+
+  # Rule 4: Low risk auto-reply (only if owner allows)
+  - name: auto_reply
+    condition: "risk_score < {auto_reply_max_risk} and auto_reply_enabled == true"
+    action: auto_reply
+    dispatch:
+      tts: true
+      notify_owner: false
+    reason: "Low risk — auto-reply permitted"
+
+  # Rule 5: Medium risk — notify owner
+  - name: notify_owner_default
+    condition: "default"
+    action: notify_owner
+    dispatch:
+      tts: false
+      notify_owner: true
+    reason: "Medium risk — owner notification"
+
+# ─────────────────────────────────────────
+# Vacation mode overrides (applied when vacation_mode == true)
+# ─────────────────────────────────────────
+vacation_overrides:
+  escalate_risk: 0.5
+  auto_reply_max_risk: 0.3
+  default_action: escalate
+
+# ─────────────────────────────────────────
+# Night mode (22:00–06:00 local time, future)
+# ─────────────────────────────────────────
+night_mode:
+  start_hour: 22
+  end_hour: 6
+  lower_auto_reply_threshold: 0.3
+  escalate_risk: 0.5

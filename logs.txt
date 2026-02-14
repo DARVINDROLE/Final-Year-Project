@@ -1,44 +1,48 @@
-PS D:\Final-year-project\Final-Year-Project> python -m pytest api/tests/test_main.py -v
-C:\Program Files\Python313\python.exe: No module named pytest
-PS D:\Final-year-project\Final-Year-Project> fyp-api\Scripts\activate         
-(fyp-api) PS D:\Final-year-project\Final-Year-Project> python -m pytest api/tests/test_main.py -v
-============================ test session starts ============================
-platform win32 -- Python 3.11.9, pytest-9.0.2, pluggy-1.6.0 -- D:\Final-year-project\Final-Year-Project\fyp-api\Scripts\python.exe
-cachedir: .pytest_cache
-rootdir: D:\Final-year-project\Final-Year-Project
-plugins: anyio-4.12.1, langsmith-0.7.3
-collected 2 items                                                            
+(fyp-api) PS D:\Final-year-project\Final-Year-Project> python api/tests/test_webcam_ring.py --voice
+=======================================================
+  Smart Doorbell - Webcam + Voice Test
+=======================================================
+  Mode: IMAGE + VOICE (record with R, capture with SPACE)
 
-api/tests/test_main.py::test_ring_creates_session_in_sqlite PASSED     [ 50%]
-api/tests/test_main.py::test_session_id_auto_generation PASSED         [100%]
+=== Webcam Preview ===
+Press R to START/STOP voice recording (then SPACE to send)
+Press SPACE to capture image and send to doorbell API
+Press Q to quit without sending
+======================
 
-============================= warnings summary ==============================
-api/tests/test_main.py::test_ring_creates_session_in_sqlite
-  D:\Final-year-project\Final-Year-Project\api\models.py:17: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
-    device_id: str = Field(..., example="frontdoor-01")
+  [MIC] Recording started... speak now
+  [MIC] Recording stopped — 6.5s captured
+Captured frame: 640x480, base64 size: 38764 chars
+Audio base64 size: 275856 chars
 
-api/tests/test_main.py::test_ring_creates_session_in_sqlite
-  D:\Final-year-project\Final-Year-Project\api\models.py:18: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
-    metadata: dict[str, Any] = Field(default_factory=dict, example={"rssi": -50})
+Sending ring event to API...
+Ring response: {
+  "sessionId": "visitor_e6e23dae",
+  "status": "queued",
+  "imagePath": "data/snaps/visitor_e6e23dae.jpg",
+  "audioPath": "data/tmp/visitor_e6e23dae/ring_audio.wav"
+}
 
-api/tests/test_main.py::test_ring_creates_session_in_sqlite
-  D:\Final-year-project\Final-Year-Project\api\main.py:29: DeprecationWarning:
+Polling session visitor_e6e23dae...
+  Status: processing
+  Status: perception_done
+  Status: completed
 
-          on_event is deprecated, use lifespan event handlers instead.        
+Final result: {
+  "sessionId": "visitor_e6e23dae",
+  "status": "completed",
+  "lastUpdated": "2026-02-14T14:25:32.305401+00:00",
+  "riskScore": 0.255
+}
 
-          Read more about it in the
-          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+--- Pipeline completed successfully! ---
+  Risk Score: 0.255
 
-    @app.on_event("startup")
+  Visitor said: (no transcript — VOSK returned empty)
+    Possible causes:
+    - Mic volume too low or wrong input device
+    - VOSK models not loaded (check server logs)
+    - Recording too short (try speaking longer)
+  AI Reply:     "Please wait while I notify the owner."
 
-api/tests/test_main.py::test_ring_creates_session_in_sqlite
-  D:\Final-year-project\Final-Year-Project\fyp-api\Lib\site-packages\fastapi\applications.py:4573: DeprecationWarning:
-          on_event is deprecated, use lifespan event handlers instead.        
-
-          Read more about it in the
-          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
-
-    return self.router.on_event(event_type)
-
--- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html       
-======================= 2 passed, 4 warnings in 1.03s ===========
+  [TTS] Speaking: "Please wait while I notify the owner."

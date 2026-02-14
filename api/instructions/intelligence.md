@@ -80,13 +80,14 @@
 #     * "help" intent → "I'm alerting the owner right away."
 #     * "visitor" intent → "Please wait while I notify the owner."
 #     * "unknown" intent → "Please wait while I notify the owner."
-#   - FUTURE (Phase 3+): For uncertain intents or conversation mode, call
-#     Groq LLM API with:
+#   - For uncertain intents or conversation mode, calls Groq LLM API with:
 #     * System prompt from api/prompts/groq_system_prompt.txt
-#     * Context: last 2 transcript rows + perception summary
-#     * Parameters: max_tokens=128, temperature=0.2
-#     * Timeout: 6–10 seconds
-#     * On API failure: fall back to canned reply and set escalation=True
+#     * Context: detected objects + transcript + emotion + risk level
+#     * Parameters: max_tokens=128, temperature=0.2, model from GROQ_MODEL env
+#     * Timeout: 8 seconds, 2 retries with exponential backoff
+#     * On API failure: fall back to canned reply
+#   - Requires GROQ_API_KEY environment variable set.
+#   - If GROQ_API_KEY is not set, falls back to fully rule-based mode.
 #
 # ─────────────────────────────────────────
 # SECTION 3 — OUTPUT CONTRACT

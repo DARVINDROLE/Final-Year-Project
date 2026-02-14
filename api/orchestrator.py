@@ -123,7 +123,12 @@ class Orchestrator:
                 )
 
                 decision = await asyncio.wait_for(
-                    self.decision_agent.process(intelligence), timeout=5
+                    self.decision_agent.process(
+                        intelligence,
+                        weapon_detected=perception.weapon_detected,
+                        anti_spoof_score=perception.anti_spoof_score,
+                    ),
+                    timeout=5,
                 )
                 self.db.update_session(
                     session_id, "decision_done", risk_score=float(intelligence.risk_score)

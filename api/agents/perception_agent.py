@@ -296,6 +296,7 @@ class PerceptionAgent(BaseAgent):
 
             sample_rate = wf.getframerate()
             rec = vosk.KaldiRecognizer(model, sample_rate)
+            rec.SetWords(True)  # request word-level confidence when available
 
             transcript_parts = []
             total_confidence = 0.0
@@ -310,21 +311,29 @@ class PerceptionAgent(BaseAgent):
                     text = result.get("text", "")
                     if text:
                         transcript_parts.append(text)
+                        num_results += 1
                         if "result" in result:
                             word_confs = [w.get("conf", 0.0) for w in result["result"]]
                             if word_confs:
                                 total_confidence += sum(word_confs) / len(word_confs)
-                                num_results += 1
+                            else:
+                                total_confidence += 0.7  # default confidence when words recognized but no per-word conf
+                        else:
+                            total_confidence += 0.7  # default confidence for text without word-level detail
 
             final_result = json.loads(rec.FinalResult())
             final_text = final_result.get("text", "")
             if final_text:
                 transcript_parts.append(final_text)
+                num_results += 1
                 if "result" in final_result:
                     word_confs = [w.get("conf", 0.0) for w in final_result["result"]]
                     if word_confs:
                         total_confidence += sum(word_confs) / len(word_confs)
-                        num_results += 1
+                    else:
+                        total_confidence += 0.7
+                else:
+                    total_confidence += 0.7
 
             wf.close()
 

@@ -28,3 +28,4 @@ dist-ssr
 *.pyc
 *.pyd
 /fyp-api
+/data

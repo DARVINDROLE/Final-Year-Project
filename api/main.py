@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import os
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .models import AiReplyRequest, RingEvent
 from .orchestrator import Orchestrator
+
+load_dotenv()  # load .env before anything reads os.getenv
 
 app = FastAPI(title="Smart Doorbell API")
 

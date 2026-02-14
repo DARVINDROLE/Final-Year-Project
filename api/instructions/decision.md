@@ -99,7 +99,8 @@
 # 2. Decision Agent is purely rule-based — no ML, no API calls, no latency.
 # 3. Decision Agent must never modify or override Intelligence Agent's risk_score.
 # 4. Decision Agent is stateless — no memory of previous sessions.
-# 5. FUTURE: Load policy file from api/policies/policy.yaml for configurable
-#    thresholds and per-device rules.
+# 5. Policy file loaded from api/policies/policy.yaml with configurable
+#    thresholds (escalate_risk, auto_reply_max_risk), owner defaults, and
+#    vacation mode overrides. Falls back to built-in defaults if missing.
 # 6. Log all decisions to data/logs/decision_agent.log with session_id,
 #    final_action, reason, and risk_score for audit trail.
