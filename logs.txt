@@ -1,0 +1,44 @@
+PS D:\Final-year-project\Final-Year-Project> python -m pytest api/tests/test_main.py -v
+C:\Program Files\Python313\python.exe: No module named pytest
+PS D:\Final-year-project\Final-Year-Project> fyp-api\Scripts\activate         
+(fyp-api) PS D:\Final-year-project\Final-Year-Project> python -m pytest api/tests/test_main.py -v
+============================ test session starts ============================
+platform win32 -- Python 3.11.9, pytest-9.0.2, pluggy-1.6.0 -- D:\Final-year-project\Final-Year-Project\fyp-api\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Final-year-project\Final-Year-Project
+plugins: anyio-4.12.1, langsmith-0.7.3
+collected 2 items                                                            
+
+api/tests/test_main.py::test_ring_creates_session_in_sqlite PASSED     [ 50%]
+api/tests/test_main.py::test_session_id_auto_generation PASSED         [100%]
+
+============================= warnings summary ==============================
+api/tests/test_main.py::test_ring_creates_session_in_sqlite
+  D:\Final-year-project\Final-Year-Project\api\models.py:17: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    device_id: str = Field(..., example="frontdoor-01")
+
+api/tests/test_main.py::test_ring_creates_session_in_sqlite
+  D:\Final-year-project\Final-Year-Project\api\models.py:18: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    metadata: dict[str, Any] = Field(default_factory=dict, example={"rssi": -50})
+
+api/tests/test_main.py::test_ring_creates_session_in_sqlite
+  D:\Final-year-project\Final-Year-Project\api\main.py:29: DeprecationWarning:
+
+          on_event is deprecated, use lifespan event handlers instead.        
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    @app.on_event("startup")
+
+api/tests/test_main.py::test_ring_creates_session_in_sqlite
+  D:\Final-year-project\Final-Year-Project\fyp-api\Lib\site-packages\fastapi\applications.py:4573: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.        
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    return self.router.on_event(event_type)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html       
+======================= 2 passed, 4 warnings in 1.03s ===========

@@ -59,6 +59,99 @@ This project is built with:
 - React
 - shadcn-ui
 - Tailwind CSS
+- FastAPI (Python backend)
+- SQLite (persistence)
+- YOLOv8 (object & weapon detection)
+- VOSK (offline speech-to-text)
+- Groq API (LLM intelligence)
+
+---
+
+## Backend Setup (API)
+
+### Prerequisites
+
+- Python 3.11 installed (`py -3.11` on Windows)
+- VOSK models in `models/` (optional, for STT)
+
+### Create virtual environment
+
+```powershell
+# From project root
+py -3.11 -m venv fyp-api
+fyp-api\Scripts\activate
+pip install -r api/requirements.txt
+```
+
+### Create required data folders
+
+```powershell
+mkdir data\snaps, data\tts, data\logs, data\tmp -Force
+```
+
+### Environment variables
+
+Create a `.env` file in project root:
+
+```
+GROQ_API_KEY=your_groq_api_key_here
+```
+
+### Start the API server
+
+```powershell
+fyp-api\Scripts\activate
+python -m uvicorn api.main:app --reload --port 8000
+```
+
+API docs available at: http://127.0.0.1:8000/docs
+
+### Run tests
+
+```powershell
+fyp-api\Scripts\activate
+python -m pytest api/tests/ -v
+```
+
+### Webcam test (live camera → full agent pipeline)
+
+Start the API server first, then in a second terminal:
+
+```powershell
+fyp-api\Scripts\activate
+python api/tests/test_webcam_ring.py
+```
+
+- Webcam preview opens
+- Press **SPACE** to capture and send to the doorbell API
+- Press **Q** to quit
+- Polls session status until pipeline completes
+
+### Manual API test (Swagger UI)
+
+1. Open http://127.0.0.1:8000/docs
+2. Try `POST /api/ring` with:
+   ```json
+   {
+     "type": "ring",
+     "timestamp": "2026-02-14T12:00:00Z",
+     "device_id": "frontdoor-01"
+   }
+   ```
+3. Copy the `sessionId` from response
+4. Try `GET /api/session/{sessionId}/status` to watch pipeline progress
+
+### VOSK models (for speech-to-text)
+
+Download from https://alphacephei.com/vosk/models and extract into `models/`:
+
+```
+models/
+├── vosk-model-small-en-in-0.4/    # Indian English
+└── vosk-model-small-hi-0.22/      # Hindi
+```
+
+---
 
 ## How can I deploy this project?
 

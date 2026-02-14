@@ -1,6 +1,18 @@
 fastapi
-uvicorn
+uvicorn[standard]
+pydantic
+numpy
+pillow
+ultralytics
+soundfile
+vosk
+aiofiles
+requests
 python-dotenv
+groq
+pytest
+httpx
+
+# Existing stack (kept during migration from monolithic index.py)
 langchain-groq
 langchain-core
-pydantic
