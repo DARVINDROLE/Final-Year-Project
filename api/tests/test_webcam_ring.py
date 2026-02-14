@@ -428,23 +428,73 @@ def fetch_session_details(session_id: str) -> dict:
 # ══════════════════════════════════════════════════════════════
 
 def speak_reply(text: str) -> None:
-    """Play the AI reply text via local TTS (pyttsx3) so tester can hear it."""
+    """Play the AI reply text via local TTS (edge-tts neural voice, pyttsx3 fallback)."""
     if not text:
         return
 
+    # Try edge-tts first (natural-sounding Microsoft neural voice)
+    try:
+        import asyncio
+        import tempfile
+        import edge_tts
+
+        VOICE = "en-IN-NeerjaNeural"
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        async def _gen():
+            comm = edge_tts.Communicate(text, VOICE)
+            await comm.save(tmp_path)
+
+        asyncio.run(_gen())
+        print(f"\n  [TTS] Speaking ({VOICE}): \"{text}\"")
+
+        # Play the MP3 — try platform methods
+        import platform, subprocess, os
+        system = platform.system()
+        if system == "Windows":
+            abs_path = os.path.abspath(tmp_path).replace("\\", "/")
+            ps_script = (
+                "Add-Type -AssemblyName PresentationCore; "
+                "$p = New-Object System.Windows.Media.MediaPlayer; "
+                f"$p.Open([uri]'file:///{abs_path}'); "
+                "Start-Sleep -Milliseconds 500; "
+                "$p.Play(); "
+                "while(-not $p.NaturalDuration.HasTimeSpan){Start-Sleep -Milliseconds 100}; "
+                "$dur = [int]$p.NaturalDuration.TimeSpan.TotalMilliseconds + 200; "
+                "Start-Sleep -Milliseconds $dur; "
+                "$p.Close()"
+            )
+            subprocess.run(["powershell", "-c", ps_script], check=False, timeout=30, shell=False, capture_output=True)
+        elif system == "Darwin":
+            subprocess.run(["afplay", tmp_path], check=False, timeout=30, shell=False)
+        else:
+            for cmd in [["mpg123", "-q", tmp_path], ["ffplay", "-nodisp", "-autoexit", tmp_path]]:
+                try:
+                    r = subprocess.run(cmd, check=False, timeout=30, shell=False, capture_output=True)
+                    if r.returncode == 0:
+                        break
+                except FileNotFoundError:
+                    continue
+        return
+    except ImportError:
+        pass
+    except Exception as exc:
+        print(f"  [TTS] edge-tts failed ({exc}), trying pyttsx3 fallback...")
+
+    # Fallback: pyttsx3
     try:
         import pyttsx3
         engine = pyttsx3.init()
-        engine.setProperty("rate", 160)  # slightly slower for clarity
+        engine.setProperty("rate", 160)
         engine.setProperty("volume", 1.0)
-        print(f"\n  [TTS] Speaking: \"{text}\"")
+        print(f"\n  [TTS] Speaking (pyttsx3): \"{text}\"")
         engine.say(text)
         engine.runAndWait()
         engine.stop()
     except ImportError:
-        print("  [TTS] pyttsx3 not installed — printing reply instead:")
+        print("  [TTS] No TTS engine available — printing reply instead:")
         print(f"        \"{text}\"")
-        print("  Install with: pip install pyttsx3")
     except Exception as exc:
         print(f"  [TTS] Playback failed: {exc}")
         print(f"        Reply text: \"{text}\"")
