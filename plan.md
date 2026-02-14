@@ -48,6 +48,8 @@ Split the monolithic backend into 4 agents (Perception, Intelligence, Decision, 
       ├─ test_orchestrator.py
       ├─ test_perception.py
       └─ ...
+└─ weapon_detection/                 # existing custom weapon model + scripts
+  └─ runs/detect/Normal_Compressed/weights/best.pt
 ```
 
 ---
@@ -276,7 +278,7 @@ CREATE TABLE IF NOT EXISTS actions (
 
 ## Phase 2 — Perception Agent (2–4 days)
 
-**Goal:** Implement `PerceptionAgent` that runs YOLOv8n (CPU), STT (VOSK or whisper-tiny alternative), emotion heuristics, anti-spoof.
+**Goal:** Implement `PerceptionAgent` that runs YOLOv8n (CPU), STT (VOSK or whisper-tiny alternative), emotion heuristics, anti-spoof, and weapon detection using the existing `weapon_detection` model.
 
 **Files**
 
@@ -311,6 +313,61 @@ async def run_yolo(image_path):
 * Save a small annotated snapshot `data/snaps/visitor_<id>_annot.jpg`.
 * Return `PerceptionOutput` Pydantic model.
 
+### Weapon model integration (inside existing Perception Agent)
+
+Use your existing model from `weapon_detection/` directly in `api/agents/perception_agent.py`:
+
+1. Load weapon model once at agent init from:
+  * `weapon_detection/runs/detect/Normal_Compressed/weights/best.pt`
+2. Add a helper method in `PerceptionAgent` (not a new agent):
+  * `_run_weapon_detection(image_path: str) -> dict`
+  * execute via `asyncio.to_thread(...)` to avoid blocking the event loop.
+3. Detection thresholds:
+  * `conf >= 0.6` => weapon candidate.
+4. Merge into perception output context:
+  * add object labels (`knife`, `gun`, etc.) to `objects` list when detected,
+  * include `weapon_detected` and `weapon_confidence` in internal pipeline context for downstream agents.
+5. Risk handoff rule to Intelligence Agent:
+  * if `weapon_detected == True`, force high-priority risk baseline (example: clamp `risk_score >= 0.75`).
+6. Decision impact:
+  * policy must escalate when weapon is detected (`notify_owner`/`notify_watchman` as per policy file).
+
+Reference implementation sketch to place inside `PerceptionAgent`:
+
+```python
+from pathlib import Path
+from ultralytics import YOLO
+import asyncio
+
+class PerceptionAgent(BaseAgent):
+   def __init__(self, ...):
+      super().__init__(...)
+      weapon_model_path = Path(__file__).resolve().parents[2] / "weapon_detection" / "runs" / "detect" / "Normal_Compressed" / "weights" / "best.pt"
+      self.weapon_model = YOLO(str(weapon_model_path))
+
+   def _weapon_detect_sync(self, image_path: str, conf_thres: float = 0.6) -> dict:
+      results = self.weapon_model(image_path, verbose=False)
+      detected = False
+      top_conf = 0.0
+      labels = []
+      for result in results:
+        for idx, _ in enumerate(result.boxes.xyxy):
+           conf = float(result.boxes.conf[idx])
+           if conf >= conf_thres:
+              detected = True
+              top_conf = max(top_conf, conf)
+              cls_id = int(result.boxes.cls[idx])
+              labels.append(result.names[cls_id])
+      return {
+        "weapon_detected": detected,
+        "weapon_confidence": top_conf,
+        "weapon_labels": labels,
+      }
+
+   async def _run_weapon_detection(self, image_path: str) -> dict:
+      return await asyncio.to_thread(self._weapon_detect_sync, image_path)
+```
+
 **instructions/perception.md** (full file content must include):
 
 * Precise step-by-step required output JSON.
@@ -321,12 +378,14 @@ async def run_yolo(image_path):
 **Tests**
 
 * Unit test that uses a deterministic test image and asserts `person_detected` true/false, and correct structure.
+* Add a weapon fixture test to assert `weapon_detected` behavior and confidence extraction from the custom model.
 
 **Pi tips**
 
 * Use `imgsz=416` or 640; prefer smaller size to reduce CPU/time.
 * Use `model.predict(source, device='cpu', half=False)`; disable `cuda`.
 * Use `ultralytics` 8n weights; convert to ONNX if needed for extra speed.
+* Reuse a single loaded weapon model instance in `PerceptionAgent` (do not reload per request).
 
 ---
 
