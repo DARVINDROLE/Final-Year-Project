@@ -87,15 +87,19 @@ class DecisionAgent(BaseAgent):
         intelligence: IntelligenceOutput,
         weapon_detected: bool = False,
         anti_spoof_score: float = 0.0,
+        context_flags: list[str] | None = None,
+        num_persons: int = 0,
+        face_visible: bool = True,
     ) -> DecisionOutput:
         """Evaluate policy rules against intelligence output. Extra context
-        (weapon_detected, anti_spoof_score) is forwarded by the orchestrator
-        for rules that need perception-level data."""
+        (weapon_detected, anti_spoof_score, context_flags, etc.) is forwarded
+        by the orchestrator for rules that need perception-level data."""
 
         thresholds = self._active_thresholds()
         escalate_risk = thresholds.get("escalate_risk", 0.7)
         auto_reply_max = thresholds.get("auto_reply_max_risk", 0.4)
         auto_reply_enabled = self._owner.get("auto_reply_enabled", True)
+        flags = context_flags or []
 
         # --- Rule 1: weapon → always escalate ---
         if weapon_detected:
@@ -106,7 +110,34 @@ class DecisionAgent(BaseAgent):
                 {"tts": True, "notify_owner": True, "notify_watchman": True},
             )
 
-        # --- Rule 2: high risk / escalation flag ---
+        # --- Rule 2: scam attempt (OTP, financial, KYC) → always escalate ---
+        if intelligence.intent == "scam_attempt" or "otp_request" in flags:
+            return self._decision(
+                intelligence.session_id,
+                "escalate",
+                f"Scam pattern detected (intent={intelligence.intent}, flags={flags})",
+                {"tts": True, "notify_owner": True, "notify_watchman": False},
+            )
+
+        # --- Rule 3: aggression / threats → escalate ---
+        if intelligence.intent == "aggression":
+            return self._decision(
+                intelligence.session_id,
+                "escalate",
+                "Aggressive/threatening visitor — mandatory escalation",
+                {"tts": True, "notify_owner": True, "notify_watchman": True},
+            )
+
+        # --- Rule 4: occupancy probe → escalate (never reveal occupancy) ---
+        if intelligence.intent == "occupancy_probe" or "occupancy_probe" in flags:
+            return self._decision(
+                intelligence.session_id,
+                "escalate",
+                "Occupancy probe detected — security escalation",
+                {"tts": True, "notify_owner": True, "notify_watchman": False},
+            )
+
+        # --- Rule 5: high risk / escalation flag ---
         if intelligence.escalation_required or intelligence.risk_score >= escalate_risk:
             return self._decision(
                 intelligence.session_id,
@@ -115,7 +146,7 @@ class DecisionAgent(BaseAgent):
                 {"tts": True, "notify_owner": True},
             )
 
-        # --- Rule 3: anti-spoof trigger ---
+        # --- Rule 6: anti-spoof trigger ---
         if anti_spoof_score >= 0.6:
             return self._decision(
                 intelligence.session_id,
@@ -124,7 +155,44 @@ class DecisionAgent(BaseAgent):
                 {"tts": True, "notify_owner": True},
             )
 
-        # --- Rule 4: low risk auto-reply ---
+        # --- Rule 7: face hidden / camera blocking → notify owner ---
+        if not face_visible:
+            return self._decision(
+                intelligence.session_id,
+                "notify_owner",
+                "Face not visible / camera blocked — forwarding to owner",
+                {"tts": True, "notify_owner": True},
+            )
+
+        # --- Rule 8: identity/staff/authority claims → always notify owner ---
+        notify_intents = {"identity_claim", "domestic_staff", "government_claim", "entry_request"}
+        if intelligence.intent in notify_intents or "identity_claim" in flags or "staff_claim" in flags:
+            return self._decision(
+                intelligence.session_id,
+                "notify_owner",
+                f"Unverifiable claim ({intelligence.intent}) — owner must decide",
+                {"tts": True, "notify_owner": True},
+            )
+
+        # --- Rule 9: multi-person group → notify owner ---
+        if num_persons > 2:
+            return self._decision(
+                intelligence.session_id,
+                "notify_owner",
+                f"Multiple persons detected ({num_persons}) — owner notification",
+                {"tts": True, "notify_owner": True},
+            )
+
+        # --- Rule 10: child/elderly emergency → notify owner (empathetic) ---
+        if intelligence.intent == "child_elderly":
+            return self._decision(
+                intelligence.session_id,
+                "notify_owner",
+                "Child or elderly visitor needs assistance — owner notified",
+                {"tts": True, "notify_owner": True},
+            )
+
+        # --- Rule 11: low risk auto-reply ---
         if intelligence.risk_score < auto_reply_max and auto_reply_enabled:
             return self._decision(
                 intelligence.session_id,
@@ -133,7 +201,7 @@ class DecisionAgent(BaseAgent):
                 {"tts": True, "notify_owner": False},
             )
 
-        # --- Rule 5: default medium risk → notify owner ---
+        # --- Rule 12: default medium risk → notify owner ---
         return self._decision(
             intelligence.session_id,
             "notify_owner",

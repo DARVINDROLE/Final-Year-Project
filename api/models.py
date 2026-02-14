@@ -37,6 +37,10 @@ class PerceptionOutput(BaseModel):
     weapon_labels: list[str] = Field(default_factory=list)
     image_path: str
     timestamp: datetime
+    # --- Indian-scenario context flags (Phase 5 hardening) ---
+    num_persons: int = 0
+    face_visible: bool = True
+    context_flags: list[str] = Field(default_factory=list)
 
 
 class IntelligenceOutput(BaseModel):

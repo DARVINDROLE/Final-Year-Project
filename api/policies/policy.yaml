@@ -4,6 +4,8 @@
 # Rules are evaluated in priority order (top → bottom). First match wins.
 # Edit thresholds and actions here without touching agent code.
 #
+# Hardened for Indian household scenarios (45+ edge cases from scenarios.md).
+#
 # Supported final_action values:
 #   escalate     – alert owner + security, play security reply
 #   auto_reply   – play TTS reply, no owner notification
@@ -20,7 +22,7 @@
 thresholds:
   escalate_risk: 0.7       # risk_score >= this → escalate
   auto_reply_max_risk: 0.4 # risk_score < this → auto_reply allowed
-  night_escalate_risk: 0.5 # used when night_mode triggers (future)
+  night_escalate_risk: 0.5 # used when night_mode triggers
 
 # ─────────────────────────────────────────
 # Owner defaults (overridable per-device)
@@ -36,6 +38,7 @@ owner_defaults:
 
 # ─────────────────────────────────────────
 # Decision rules — evaluated top-to-bottom
+# Indian-household hardened (12 rules)
 # ─────────────────────────────────────────
 rules:
   # Rule 1: Weapon detected → always escalate (highest priority)
@@ -48,7 +51,37 @@ rules:
       notify_watchman: true
     reason: "Weapon detected — mandatory escalation"
 
-  # Rule 2: Intelligence flagged escalation or high risk
+  # Rule 2: Scam attempt (OTP / financial / KYC) → always escalate
+  - name: scam_escalation
+    condition: "intent == 'scam_attempt' or 'otp_request' in context_flags"
+    action: escalate
+    dispatch:
+      tts: true
+      notify_owner: true
+      notify_watchman: false
+    reason: "Scam pattern detected — OTP/financial/KYC"
+
+  # Rule 3: Aggression or threats → escalate
+  - name: aggression_escalation
+    condition: "intent == 'aggression'"
+    action: escalate
+    dispatch:
+      tts: true
+      notify_owner: true
+      notify_watchman: true
+    reason: "Aggressive/threatening visitor"
+
+  # Rule 4: Occupancy probe → escalate (never reveal occupancy)
+  - name: occupancy_probe_escalation
+    condition: "intent == 'occupancy_probe' or 'occupancy_probe' in context_flags"
+    action: escalate
+    dispatch:
+      tts: true
+      notify_owner: true
+      notify_watchman: false
+    reason: "Occupancy probe — security risk"
+
+  # Rule 5: Intelligence flagged escalation or high risk
   - name: high_risk_escalation
     condition: "escalation_required == true or risk_score >= {escalate_risk}"
     action: escalate
@@ -57,7 +90,7 @@ rules:
       notify_owner: true
     reason: "High risk or escalation flag set"
 
-  # Rule 3: Anti-spoof trigger
+  # Rule 6: Anti-spoof trigger
   - name: spoof_escalation
     condition: "anti_spoof_score >= 0.6"
     action: escalate
@@ -66,7 +99,43 @@ rules:
       notify_owner: true
     reason: "Anti-spoof score indicates possible spoofing"
 
-  # Rule 4: Low risk auto-reply (only if owner allows)
+  # Rule 7: Face hidden or camera blocked → notify owner
+  - name: face_hidden_notify
+    condition: "face_visible == false"
+    action: notify_owner
+    dispatch:
+      tts: true
+      notify_owner: true
+    reason: "Face not visible — camera blocked or obscured"
+
+  # Rule 8: Identity / staff / authority claims → always notify owner
+  - name: unverifiable_claim_notify
+    condition: "intent in ('identity_claim', 'domestic_staff', 'government_claim', 'entry_request')"
+    action: notify_owner
+    dispatch:
+      tts: true
+      notify_owner: true
+    reason: "Unverifiable claim — owner must decide"
+
+  # Rule 9: Multi-person group → notify owner
+  - name: multi_person_notify
+    condition: "num_persons > 2"
+    action: notify_owner
+    dispatch:
+      tts: true
+      notify_owner: true
+    reason: "Multiple persons detected"
+
+  # Rule 10: Child / elderly emergency → notify owner
+  - name: child_elderly_notify
+    condition: "intent == 'child_elderly'"
+    action: notify_owner
+    dispatch:
+      tts: true
+      notify_owner: true
+    reason: "Child or elderly visitor needs assistance"
+
+  # Rule 11: Low risk auto-reply (only if owner allows)
   - name: auto_reply
     condition: "risk_score < {auto_reply_max_risk} and auto_reply_enabled == true"
     action: auto_reply
@@ -75,7 +144,7 @@ rules:
       notify_owner: false
     reason: "Low risk — auto-reply permitted"
 
-  # Rule 5: Medium risk — notify owner
+  # Rule 12: Medium risk — notify owner (default)
   - name: notify_owner_default
     condition: "default"
     action: notify_owner
@@ -93,10 +162,27 @@ vacation_overrides:
   default_action: escalate
 
 # ─────────────────────────────────────────
-# Night mode (22:00–06:00 local time, future)
+# Night mode (22:00–06:00 local time)
 # ─────────────────────────────────────────
 night_mode:
   start_hour: 22
   end_hour: 6
+  risk_adjustment: 0.30   # added to base risk during night hours
+
+# ─────────────────────────────────────────
+# Indian-context risk weight matrix
+# Applied by Intelligence Agent per context_flag
+# ─────────────────────────────────────────
+context_risk_weights:
+  otp_request: 0.50
+  occupancy_probe: 0.40
+  entry_request: 0.35
+  financial_request: 0.35
+  claim_object_mismatch: 0.30
+  identity_claim: 0.25
+  authority_claim: 0.20
+  multi_person: 0.20
+  staff_claim: 0.15
+  donation_request: 0.10
   lower_auto_reply_threshold: 0.3
   escalate_risk: 0.5

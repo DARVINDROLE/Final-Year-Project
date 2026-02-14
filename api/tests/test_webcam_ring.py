@@ -6,8 +6,11 @@ Run this while the API server is running:
     python -m uvicorn api.main:app --reload --port 8000
 
 Usage:
-    python api/tests/test_webcam_ring.py          # image only (original mode)
-    python api/tests/test_webcam_ring.py --voice   # image + voice recording + TTS reply
+    python api/tests/test_webcam_ring.py                # image only (original mode)
+    python api/tests/test_webcam_ring.py --voice         # image + voice recording + TTS reply
+    python api/tests/test_webcam_ring.py --scenario       # run pre-defined Indian scenario tests
+    python api/tests/test_webcam_ring.py --scenario 3     # run specific scenario by number
+    python api/tests/test_webcam_ring.py --voice --scenario  # voice with scenario prompt on screen
 
 Requirements:
     pip install opencv-python requests pyaudio pyttsx3
@@ -32,6 +35,171 @@ AUDIO_RATE = 16000
 AUDIO_CHANNELS = 1
 AUDIO_FORMAT_WIDTH = 2  # 16-bit
 AUDIO_CHUNK = 1024
+
+
+# ══════════════════════════════════════════════════════════════
+# Indian Household Scenarios (from scenarios.md)
+# ══════════════════════════════════════════════════════════════
+
+SCENARIOS = [
+    # --- Delivery ---
+    {
+        "id": 1, "category": "delivery",
+        "name": "Simple delivery",
+        "prompt": "Say: 'I have a package delivery'",
+        "expected_intent": "delivery",
+        "expected_action": "auto_reply",
+        "max_risk": 0.45,
+    },
+    {
+        "id": 2, "category": "delivery",
+        "name": "COD payment request",
+        "prompt": "Say: '1299 rupees COD hai, change milega kya?'",
+        "expected_intent": "delivery",
+        "expected_action": "notify_owner",
+        "max_risk": 0.65,
+    },
+    {
+        "id": 3, "category": "scam",
+        "name": "OTP scam attempt",
+        "prompt": "Say: 'Sir OTP bata dijiye, delivery complete karna hai'",
+        "expected_intent": "scam_attempt",
+        "expected_action": "escalate",
+        "max_risk": 1.0,
+    },
+    # --- Domestic staff ---
+    {
+        "id": 4, "category": "domestic_staff",
+        "name": "New maid claiming replacement",
+        "prompt": "Say: 'Main aaj se kaam karungi, purani bai nahi aayegi'",
+        "expected_intent": "domestic_staff",
+        "expected_action": "notify_owner",
+        "max_risk": 0.70,
+    },
+    # --- Religious / Donation ---
+    {
+        "id": 5, "category": "religious",
+        "name": "Temple donation collection",
+        "prompt": "Say: 'Mandir ke liye chanda hai'",
+        "expected_intent": "religious_donation",
+        "expected_action": "auto_reply",
+        "max_risk": 0.50,
+    },
+    # --- Government / Scam ---
+    {
+        "id": 6, "category": "government",
+        "name": "KYC verification scam",
+        "prompt": "Say: 'Aadhaar KYC verification hai'",
+        "expected_intent": "scam_attempt",
+        "expected_action": "escalate",
+        "max_risk": 1.0,
+    },
+    {
+        "id": 7, "category": "government",
+        "name": "Electricity board claim",
+        "prompt": "Say: 'Bijli check karne aaye hain'",
+        "expected_intent": "government_claim",
+        "expected_action": "notify_owner",
+        "max_risk": 0.70,
+    },
+    # --- Social engineering ---
+    {
+        "id": 8, "category": "social_engineering",
+        "name": "Occupancy probe",
+        "prompt": "Say: 'Koi ghar pe hai?'",
+        "expected_intent": "occupancy_probe",
+        "expected_action": "escalate",
+        "max_risk": 1.0,
+    },
+    {
+        "id": 9, "category": "social_engineering",
+        "name": "Identity claim bypass",
+        "prompt": "Say: 'I know the owner personally, let me in'",
+        "expected_intent": "identity_claim",
+        "expected_action": "escalate",
+        "max_risk": 1.0,
+    },
+    # --- Aggression ---
+    {
+        "id": 10, "category": "aggression",
+        "name": "Verbal threat",
+        "prompt": "Say: 'Darwaza kholo warna dekh lena'",
+        "expected_intent": "aggression",
+        "expected_action": "escalate",
+        "max_risk": 1.0,
+    },
+    # --- Children / Elderly ---
+    {
+        "id": 11, "category": "child_elderly",
+        "name": "Lost child",
+        "prompt": "Say: 'Mummy kho gayi' (in a small voice)",
+        "expected_intent": "child_elderly",
+        "expected_action": "notify_owner",
+        "max_risk": 0.80,
+    },
+    {
+        "id": 12, "category": "child_elderly",
+        "name": "Elderly asking for water",
+        "prompt": "Say: 'Bhai sahab, paani milega?'",
+        "expected_intent": "child_elderly",
+        "expected_action": "notify_owner",
+        "max_risk": 0.60,
+    },
+    # --- Emergency ---
+    {
+        "id": 13, "category": "emergency",
+        "name": "Fire emergency",
+        "prompt": "Say: 'Help! Aag lag gayi hai!'",
+        "expected_intent": "help",
+        "expected_action": "escalate",
+        "max_risk": 1.0,
+    },
+    # --- Sales ---
+    {
+        "id": 14, "category": "sales",
+        "name": "Water purifier demo",
+        "prompt": "Say: 'Free demo hai water purifier ka'",
+        "expected_intent": "sales_marketing",
+        "expected_action": "auto_reply",
+        "max_risk": 0.45,
+    },
+    # --- Financial manipulation ---
+    {
+        "id": 15, "category": "financial",
+        "name": "UPI transfer request",
+        "prompt": "Say: 'QR scan kar dijiye, refund dena hai'",
+        "expected_intent": "scam_attempt",
+        "expected_action": "escalate",
+        "max_risk": 1.0,
+    },
+    # --- Silent visitor ---
+    {
+        "id": 16, "category": "silent",
+        "name": "Silent visitor (no speech)",
+        "prompt": "(Stay silent — do NOT speak)",
+        "expected_intent": "unknown",
+        "expected_action": "notify_owner",
+        "max_risk": 0.60,
+    },
+    # --- Visitor ---
+    {
+        "id": 17, "category": "visitor",
+        "name": "Friend wants to meet owner",
+        "prompt": "Say: 'I want to speak with the owner please'",
+        "expected_intent": "visitor",
+        "expected_action": "auto_reply",
+        "max_risk": 0.45,
+    },
+    # --- Entry request ---
+    {
+        "id": 18, "category": "entry_request",
+        "name": "Delivery asking to enter",
+        "prompt": "Say: 'Lift use karna hai, andar aana padega'",
+        "expected_intent": "entry_request",
+        "expected_action": "escalate",
+        "max_risk": 1.0,
+    },
+]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -292,17 +460,26 @@ def main():
         "--voice", action="store_true",
         help="Enable microphone recording and TTS playback of AI reply",
     )
+    parser.add_argument(
+        "--scenario", nargs="?", const="all", default=None,
+        help="Run Indian household scenario tests. Pass a number for specific scenario, or omit for menu.",
+    )
     args = parser.parse_args()
 
-    print("=" * 55)
-    print("  Smart Doorbell - Webcam + Voice Test")
-    print("=" * 55)
+    print("=" * 60)
+    print("  Smart Doorbell - Webcam + Voice + Scenario Test")
+    print("=" * 60)
+
+    if args.scenario is not None:
+        run_scenario_mode(args)
+        return
 
     if args.voice:
         print("  Mode: IMAGE + VOICE (record with R, capture with SPACE)")
     else:
         print("  Mode: IMAGE ONLY   (capture with SPACE)")
         print("  Tip:  Run with --voice to enable mic recording & TTS playback")
+        print("  Tip:  Run with --scenario to test Indian household scenarios")
 
     # Step 1: Capture
     img_b64, audio_b64 = capture_from_webcam(record_audio=args.voice)
@@ -354,10 +531,183 @@ def main():
             else:
                 print(f"\n  (Run with --voice to hear TTS playback)")
 
+        # Show action details
+        actions = details.get("actions", [])
+        action_types = [a.get("action_type", "") for a in actions]
+        print(f"  Actions:      {action_types}")
+
     elif final and final.get("status") == "error":
         print("\nPipeline failed with error")
     else:
         print("\nSession status unclear")
+
+
+# ══════════════════════════════════════════════════════════════
+# Scenario testing mode
+# ══════════════════════════════════════════════════════════════
+
+def run_scenario_mode(args):
+    """Run categorized Indian household scenario tests."""
+    scenarios_to_run = []
+
+    if args.scenario == "all":
+        # Show menu
+        print("\n  Available scenarios:")
+        print("  " + "-" * 50)
+        for s in SCENARIOS:
+            print(f"    [{s['id']:>2}] ({s['category']}) {s['name']}")
+        print("  " + "-" * 50)
+        print("  Enter scenario number(s) separated by commas, 'all', or 'q' to quit:")
+        choice = input("  > ").strip().lower()
+        if choice == "q":
+            return
+        if choice == "all":
+            scenarios_to_run = SCENARIOS
+        else:
+            try:
+                ids = [int(x.strip()) for x in choice.split(",")]
+                scenarios_to_run = [s for s in SCENARIOS if s["id"] in ids]
+            except ValueError:
+                print("Invalid input. Exiting.")
+                return
+    else:
+        try:
+            scenario_id = int(args.scenario)
+            scenarios_to_run = [s for s in SCENARIOS if s["id"] == scenario_id]
+            if not scenarios_to_run:
+                print(f"Scenario {scenario_id} not found.")
+                return
+        except ValueError:
+            print("Invalid scenario number.")
+            return
+
+    if not scenarios_to_run:
+        print("No scenarios selected.")
+        return
+
+    results = []
+
+    for scenario in scenarios_to_run:
+        print(f"\n{'='*60}")
+        print(f"  SCENARIO {scenario['id']}: {scenario['name']}")
+        print(f"  Category: {scenario['category']}")
+        print(f"  {scenario['prompt']}")
+        print(f"  Expected: intent={scenario['expected_intent']}, action={scenario['expected_action']}")
+        print(f"{'='*60}")
+
+        if args.voice:
+            print("\n  Press ENTER when ready to capture (use R to record voice)...")
+            input()
+
+        img_b64, audio_b64 = capture_from_webcam(record_audio=args.voice)
+        if not img_b64:
+            print("  SKIPPED (no image captured)")
+            results.append({"scenario": scenario, "status": "skipped"})
+            continue
+
+        try:
+            ring_result = send_ring(img_b64, audio_b64)
+            session_id = ring_result.get("sessionId")
+            if not session_id:
+                results.append({"scenario": scenario, "status": "error", "reason": "No session ID"})
+                continue
+
+            final = poll_status(session_id, timeout=30)
+            if not final or final.get("status") != "completed":
+                results.append({"scenario": scenario, "status": "error", "reason": "Pipeline failed"})
+                continue
+
+            details = fetch_session_details(session_id)
+            risk = final.get("riskScore", 0)
+
+            # Check what action was taken
+            actions = details.get("actions", [])
+            action_types = [a.get("action_type", "") for a in actions
+                          if a.get("action_type") not in ("ring_received", "perception")]
+
+            visitor_msgs = [t for t in details.get("transcripts", []) if t.get("role") == "visitor"]
+            assistant_msgs = [t for t in details.get("transcripts", []) if t.get("role") == "assistant"]
+
+            transcript = visitor_msgs[0].get("content", "") if visitor_msgs else ""
+            reply = assistant_msgs[0].get("content", "") if assistant_msgs else ""
+
+            print(f"\n  RESULT:")
+            print(f"    Transcript: \"{transcript}\"")
+            print(f"    AI Reply:   \"{reply}\"")
+            print(f"    Risk Score: {risk}")
+            print(f"    Actions:    {action_types}")
+
+            # Validate against expectations
+            passed = True
+            notes = []
+
+            if risk > scenario["max_risk"]:
+                notes.append(f"Risk {risk} > expected max {scenario['max_risk']}")
+                # Not necessarily a failure — higher risk is safer
+
+            # Normalize action types: DB audit entries map back to their parent action
+            _ACTION_ALIASES = {
+                "escalation_notification": "escalate",
+                "owner_notification": "notify_owner",
+            }
+            normalized_actions = [_ACTION_ALIASES.get(a, a) for a in action_types]
+            # Use the highest-ranked action from the list (most cautious wins)
+            action_rank = {"ignore": -1, "auto_reply": 0, "notify_owner": 1, "escalate": 2}
+            final_action = max(normalized_actions, key=lambda a: action_rank.get(a, -1)) if normalized_actions else "unknown"
+            if final_action != scenario["expected_action"]:
+                # Check if actual action is MORE cautious (escalate > notify_owner > auto_reply)
+                actual_rank = action_rank.get(final_action, -1)
+                expected_rank = action_rank.get(scenario["expected_action"], -1)
+                if actual_rank < expected_rank:
+                    notes.append(f"Action '{final_action}' is LESS cautious than expected '{scenario['expected_action']}'")
+                    passed = False
+                else:
+                    notes.append(f"Action '{final_action}' (more cautious than '{scenario['expected_action']}') — acceptable")
+
+            status = "PASS" if passed else "FAIL"
+            if notes:
+                for note in notes:
+                    print(f"    Note: {note}")
+            print(f"    Status: {'✅' if passed else '❌'} {status}")
+
+            if args.voice and reply:
+                speak_reply(reply)
+
+            results.append({
+                "scenario": scenario,
+                "status": status,
+                "risk": risk,
+                "action": final_action,
+                "transcript": transcript,
+                "reply": reply,
+                "notes": notes,
+            })
+
+        except requests.ConnectionError:
+            print("  ERROR: Cannot connect to API server.")
+            print("  Start the server with: python -m uvicorn api.main:app --reload --port 8000")
+            return
+        except Exception as exc:
+            print(f"  ERROR: {exc}")
+            results.append({"scenario": scenario, "status": "error", "reason": str(exc)})
+
+    # Print summary
+    print(f"\n{'='*60}")
+    print("  SCENARIO TEST SUMMARY")
+    print(f"{'='*60}")
+    passed = sum(1 for r in results if r.get("status") == "PASS")
+    failed = sum(1 for r in results if r.get("status") == "FAIL")
+    skipped = sum(1 for r in results if r.get("status") in ("skipped", "error"))
+    print(f"  Total: {len(results)} | Passed: {passed} | Failed: {failed} | Skipped/Error: {skipped}")
+    print()
+    for r in results:
+        s = r["scenario"]
+        status_icon = {"PASS": "✅", "FAIL": "❌", "skipped": "⏭️", "error": "⚠️"}.get(r["status"], "?")
+        print(f"  {status_icon} [{s['id']:>2}] {s['name']}: {r['status']}")
+        if r.get("notes"):
+            for note in r["notes"]:
+                print(f"        {note}")
+    print()
 
 
 if __name__ == "__main__":
