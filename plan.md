@@ -15,7 +15,7 @@ This MD is written so an automated coding agent (Claude, Codex, GPT-Engineer) ca
 
 # Quick summary (one line)
 
-Split the monolithic backend into 4 agents (Perception, Intelligence, Decision, Action) plus a lightweight Orchestrator that routes events, all inside `api/` using SQLite and an in-process async event bus. Each agent is a Python module/class with its instruction file.
+Split the monolithic backend into 4 agents (Perception, Intelligence, Decision, Action) plus a lightweight Orchestrator for inter-agent flow, with `main.py` owning all FastAPI routes; all inside `api/` using SQLite and an in-process async event bus. Each agent is a stateless Python module/class with its instruction file.
 
 ---
 
@@ -25,7 +25,8 @@ Split the monolithic backend into 4 agents (Perception, Intelligence, Decision, 
 /project-root
 ├─ frontend/                         # existing React app (unchanged except API base updates)
 └─ api/
-   ├─ orchestrator.py               # FastAPI app + event loop + session manager
+  ├─ main.py                       # FastAPI app + all routes + app startup wiring
+  ├─ orchestrator.py               # orchestration/event-bus only (no route definitions)
    ├─ agents/
    │  ├─ base_agent.py
    │  ├─ perception_agent.py
@@ -53,13 +54,15 @@ Split the monolithic backend into 4 agents (Perception, Intelligence, Decision, 
 
 # Communication pattern (Pi-friendly)
 
-* Agents do **not** run as separate docker services. They are **modular Python classes** loaded by orchestrator.
+* Agents do **not** run as separate docker services. They are **modular stateless Python classes** loaded by the orchestrator.
+* `main.py` receives API requests and delegates to orchestrator methods.
 * Orchestrator coordinates with **asyncio.Queues** per session, routes events, awaits agent responses with timeouts.
+* Agents are **decoupled**: they never call each other directly and do not depend on each other's existence.
 * All messages use the JSON schemas below (enforce via Pydantic models in `models.py`).
 
 ### Message schemas (canonical)
 
-`RingEvent` (frontend → orchestrator)
+`RingEvent` (frontend → main.py route → orchestrator)
 
 ```json
 {
@@ -203,13 +206,14 @@ CREATE TABLE IF NOT EXISTS actions (
 
   *Note:* pick STT library based on Pi build; include VOSK small model recommendation in instruction file.
 
-* Create `api/orchestrator.py` (FastAPI app skeleton) with `/api/ring`, `/api/ai-reply`, `/api/logs`, `/api/session/{id}/status` endpoints.
+* Create `api/main.py` (FastAPI app skeleton) with `/api/ring`, `/api/ai-reply`, `/api/logs`, `/api/session/{id}/status` endpoints.
+* Create `api/orchestrator.py` with orchestration/session pipeline logic only (no FastAPI route definitions).
 
 * Create `api/models.py` with Pydantic models for the schemas above.
 
 **Tests:**
 
-* `tests/test_orchestrator.py`: test `/api/ring` returns session_id and created session in SQLite.
+* `tests/test_main.py`: test `/api/ring` returns session_id and created session in SQLite.
 
 **Instruction file:**
 
@@ -217,16 +221,22 @@ CREATE TABLE IF NOT EXISTS actions (
 
 ---
 
-## Phase 1 — Orchestrator & base agent (1–2 days)
+## Phase 1 — Main API, Orchestrator & base agent (1–2 days)
 
-**Goal:** Implement the orchestrator, BaseAgent, session state machine, local async event bus.
+**Goal:** Implement `main.py` API layer, orchestrator coordination layer, BaseAgent, session state machine, and local async event bus.
 
 **What to implement**
 
+* `api/main.py`:
+
+  * Initialize FastAPI app and dependencies.
+  * Instantiate orchestrator on startup and store it in app state.
+  * Define all HTTP/WebSocket endpoints and delegate business flow to orchestrator methods.
 * `api/orchestrator.py`:
 
   * On startup, initialize DB connection, create in-memory `session_queues: Dict[session_id, asyncio.Queue]`.
-  * POST `/api/ring`:
+  * Implement methods invoked by routes (e.g., `handle_ring`, `handle_ai_reply`, `get_logs`, `get_session_status`).
+  * For ring handling:
 
     * Validate payload (RingEvent model).
     * Create `session_id` and insert session row to SQLite.
@@ -246,10 +256,15 @@ CREATE TABLE IF NOT EXISTS actions (
 * `api/agents/base_agent.py`:
 
   * `BaseAgent` that loads `instructions/*.md` at init and exposes `instructions_text`.
+  * Contract: each agent accepts typed input and returns typed output only (no shared mutable state).
+* `api/agents/*.py`:
+
+  * All agents must be stateless and independent.
+  * Agents must not import/call peer agents; only orchestrator composes them.
 
 **Tests:**
 
-* Integration test that posts a sample ring, then polls `/api/session/{id}/status` and confirms status changes from `queued` → `perception_done` → `completed` (mock agent implementations used).
+* Integration test that posts a sample ring to `main.py` route, then polls `/api/session/{id}/status` and confirms status changes from `queued` → `perception_done` → `completed` (mock agent implementations used).
 
 **Pi tips**
 
@@ -441,9 +456,9 @@ auto_reply_if:
 
 ## Phase 6 — Frontend wiring & APIs (0.5–1 day)
 
-**Goal:** Minimal change to frontend: point to orchestrator endpoints and show session status.
+**Goal:** Minimal change to frontend: point to `main.py` API endpoints and show session status.
 
-**APIs to expose from orchestrator**
+**APIs to expose from `main.py`**
 
 * `POST /api/ring` — same as before
 * `POST /api/ai-reply` — route owner typed reply into transcript and optionally to intelligence or action
@@ -600,15 +615,16 @@ Add this to `api/prompts/groq_system_prompt.txt`.
 3. `api/prompts/groq_system_prompt.txt` with concrete system prompt (we can provide if you want).
 4. `api/requirements.txt` ready for Pi (note VOSK build instructions in README).
 5. Unit & integration tests in `api/tests/`.
-6. README in `api/` explaining how to run on Pi: install dependencies, get VOSK model, set `GROQ_API_KEY`, then `uvicorn orchestrator:app --host 0.0.0.0 --port 8000`.
+6. README in `api/` explaining how to run on Pi: install dependencies, get VOSK model, set `GROQ_API_KEY`, then `uvicorn main:app --host 0.0.0.0 --port 8000`.
 
 
 ---
 
 # Final checklist (before handing to Claude/Codex agent)
 
-* [ ] `api/` skeleton created with `models.py`, `db.py`, `orchestrator.py`.
+* [ ] `api/` skeleton created with `main.py`, `models.py`, `db.py`, `orchestrator.py`.
 * [ ] `api/agents/*.py` files present (base + 4 agents).
+* [ ] Agents are stateless and do not reference each other directly.
 * [ ] `api/instructions/*.md` filled with exact instructions above.
 * [ ] `api/prompts/groq_system_prompt.txt` created and referenced by `intelligence_agent`.
 * [ ] `api/requirements.txt` created and Pi notes included in README.
