@@ -1,6 +1,7 @@
-fastapi
-uvicorn
-python-dotenv
-langchain-groq
-langchain-core
-pydantic
+fastapi==0.129.0
+uvicorn==0.40.0
+python-dotenv==1.2.1
+langchain-groq==1.1.2
+langchain-core==1.2.12
+pydantic==2.12.5
+edge-tts==7.2.7
