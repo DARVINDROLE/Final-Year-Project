@@ -581,8 +581,33 @@ def main():
             else:
                 print(f"\n  (Run with --voice to hear TTS playback)")
 
-        # Show action details
+        # Show weapon detection details from perception payload
         actions = details.get("actions", [])
+        perception_actions = [a for a in actions if a.get("action_type") == "perception"]
+        if perception_actions:
+            p = perception_actions[0].get("payload", {})
+            if isinstance(p, str):
+                import json as _json
+                p = _json.loads(p)
+            weapon_det = p.get("weapon_detected", False)
+            weapon_conf = p.get("weapon_confidence", 0.0)
+            weapon_labels = p.get("weapon_labels", [])
+            objects = p.get("objects", [])
+            obj_labels = [o.get("label", "?") for o in objects] if objects else []
+            print(f"\n  --- Vision Detection ---")
+            print(f"  Objects detected: {obj_labels}")
+            print(f"  Weapon detected:  {weapon_det}")
+            if weapon_det:
+                print(f"  Weapon labels:    {weapon_labels}")
+                print(f"  Weapon confidence:{weapon_conf:.1%}")
+            else:
+                print(f"  Weapon confidence: 0%")
+            print(f"  Persons:          {p.get('num_persons', 0)}")
+            print(f"  Face visible:     {p.get('face_visible', 'N/A')}")
+            print(f"  Emotion:          {p.get('emotion', 'N/A')}")
+            print(f"  Context flags:    {p.get('context_flags', [])}")
+
+        # Show action details
         action_types = [a.get("action_type", "") for a in actions]
         print(f"  Actions:      {action_types}")
 
@@ -686,6 +711,25 @@ def run_scenario_mode(args):
             print(f"    AI Reply:   \"{reply}\"")
             print(f"    Risk Score: {risk}")
             print(f"    Actions:    {action_types}")
+
+            # Show weapon detection details
+            perception_actions = [a for a in actions if a.get("action_type") == "perception"]
+            if perception_actions:
+                p = perception_actions[0].get("payload", {})
+                if isinstance(p, str):
+                    import json as _json2
+                    p = _json2.loads(p)
+                weapon_det = p.get("weapon_detected", False)
+                weapon_conf = p.get("weapon_confidence", 0.0)
+                weapon_labels = p.get("weapon_labels", [])
+                objects = p.get("objects", [])
+                obj_labels = [o.get("label", "?") for o in objects] if objects else []
+                print(f"    --- Vision ---")
+                print(f"    Objects:    {obj_labels}")
+                print(f"    Weapon:     {'YES — ' + ', '.join(weapon_labels) + f' ({weapon_conf:.1%})' if weapon_det else 'No'}")
+                print(f"    Persons:    {p.get('num_persons', 0)}, Face: {p.get('face_visible', 'N/A')}, Emotion: {p.get('emotion', 'N/A')}")
+                print(f"    Flags:      {p.get('context_flags', [])}")
+
 
             # Validate against expectations
             passed = True
