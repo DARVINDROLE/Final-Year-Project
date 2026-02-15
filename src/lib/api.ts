@@ -278,7 +278,7 @@ function transformLogs(data: {
       timestamp: (s.created_at as string) || new Date().toISOString(),
       imageUrl: visitorInfo?.imageUrl || null,
       transcript: transcriptMap.get(sid) || [],
-      status: (s.status as string) === 'active' ? 'active' as const : 'completed' as const,
+      status: ['completed', 'error'].includes((s.status as string) || '') ? 'completed' as const : 'active' as const,
       aiSummary: visitorInfo?.aiSummary || '',
       visitorType: (visitorInfo?.visitorType || 'unknown') as Visitor['visitorType'],
       riskScore: (s.risk_score as number) || 0,

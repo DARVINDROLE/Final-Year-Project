@@ -256,7 +256,7 @@ class PerceptionAgent(BaseAgent):
                 "vision_confidence": 0.5,
             }
 
-    def _weapon_detect_sync(self, image_path: str, conf_thres: float = 0.35) -> dict:
+    def _weapon_detect_sync(self, image_path: str, conf_thres: float = 0.55) -> dict:
         if not image_path or self.weapon_model is None:
             return {
                 "weapon_detected": False,

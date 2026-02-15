@@ -40,6 +40,10 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
+const LIVE_API_BASE = window.location.origin.includes('localhost') || window.location.hostname === '127.0.0.1'
+  ? 'http://localhost:8000'
+  : window.location.origin;
+
 export default function Dashboard() {
   const [visitors, setVisitors] = useState<Visitor[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -52,6 +56,12 @@ export default function Dashboard() {
     sessionId: string;
     imageUrl: string | null;
     greeting: string;
+  } | null>(null);
+  const [weaponAlert, setWeaponAlert] = useState<{
+    sessionId: string;
+    labels: string[];
+    confidence: number;
+    timestamp: number;
   } | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -74,25 +84,84 @@ export default function Dashboard() {
     }
   }, [toast]);
 
+  // Stable refs so WebSocket handler always uses latest toast/loadVisitors
+  // without causing the WS effect to reconnect on every render.
+  const toastRef = useRef(toast);
+  const loadVisitorsRef = useRef(loadVisitors);
+  useEffect(() => { toastRef.current = toast; }, [toast]);
+  useEffect(() => { loadVisitorsRef.current = loadVisitors; }, [loadVisitors]);
+
   useEffect(() => {
     loadVisitors();
   }, [loadVisitors]);
 
-  // ── WebSocket for live ring notifications ────────────────
+  // ── WebSocket for live ring notifications + weapon alerts ──
+  // Connects ONCE with auto-reconnect. Uses refs for toast/loadVisitors.
   useEffect(() => {
-    const ws = connectWebSocket('owner', (data) => {
-      if (data.type === 'new_ring') {
-        const sid = data.sessionId as string;
-        const imageUrl = (data.imageUrl as string) || null;
-        const greeting = (data.greeting as string) || '';
-        toast({ title: 'New visitor!', description: 'Someone is at the door.' });
-        setActiveSession({ sessionId: sid, imageUrl, greeting });
-        loadVisitors();
-      }
-    });
-    wsRef.current = ws;
-    return () => ws.close();
-  }, [toast, loadVisitors]);
+    let cancelled = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function connect() {
+      if (cancelled) return;
+      const ws = connectWebSocket('owner', (data) => {
+        if (data.type === 'new_ring') {
+          const sid = data.sessionId as string;
+          const imageUrl = (data.imageUrl as string) || null;
+          const greeting = (data.greeting as string) || '';
+          toastRef.current({ title: 'New visitor!', description: 'Someone is at the door.' });
+          setActiveSession({ sessionId: sid, imageUrl, greeting });
+          loadVisitorsRef.current();
+        }
+        if (data.type === 'weapon_alert') {
+          const sid = data.sessionId as string;
+          const labels = (data.weapon_labels as string[]) || [];
+          const confidence = (data.weapon_confidence as number) || 0;
+          const timestamp = (data.timestamp as number) || Date.now() / 1000;
+          setWeaponAlert({ sessionId: sid, labels, confidence, timestamp });
+          toastRef.current({
+            variant: 'destructive',
+            title: '⚠️ WEAPON DETECTED!',
+            description: `Danger: ${labels.join(', ')} detected (${(confidence * 100).toFixed(0)}% confidence)`,
+          });
+          setTimeout(() => setWeaponAlert(null), 30000);
+        }
+      });
+      wsRef.current = ws;
+
+      // Auto-reconnect on close (backend restart, network glitch, etc.)
+      const origOnClose = ws.onclose;
+      ws.onclose = (e) => {
+        if (origOnClose) origOnClose.call(ws, e);
+        if (!cancelled) {
+          console.log('WebSocket disconnected, reconnecting in 2s...');
+          reconnectTimer = setTimeout(connect, 2000);
+        }
+      };
+    }
+
+    connect();
+    return () => {
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      wsRef.current?.close();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Auto-detect active session from loaded visitors ──────
+  // Fallback: if the WebSocket new_ring was missed (e.g. page loaded after ring),
+  // pick up the latest active visitor session and show it as the live view.
+  useEffect(() => {
+    if (activeSession) return; // already showing a live session
+    const active = visitors.find((v) => v.status === 'active');
+    if (active) {
+      setActiveSession({
+        sessionId: active.id,
+        imageUrl: active.imageUrl,
+        greeting: active.transcript[0]?.content || '',
+      });
+    }
+  }, [visitors, activeSession]);
 
   // ── Handlers ─────────────────────────────────────────────
   const handleLogout = async () => {
@@ -280,6 +349,41 @@ export default function Dashboard() {
           </Button>
         </div>
 
+        {/* Weapon Alert Banner */}
+        {weaponAlert && (
+          <div className="mb-6 bg-red-600 text-white rounded-xl border-2 border-red-400 p-4 animate-pulse shadow-lg shadow-red-500/30">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center">
+                  <AlertTriangle className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold">⚠️ WEAPON DETECTED</h3>
+                  <p className="text-sm text-red-100">
+                    {weaponAlert.labels.join(', ').toUpperCase()} detected with{' '}
+                    {(weaponAlert.confidence * 100).toFixed(0)}% confidence
+                  </p>
+                  <p className="text-xs text-red-200 mt-1">
+                    Session: {weaponAlert.sessionId.slice(0, 16)} •{' '}
+                    {new Date(weaponAlert.timestamp * 1000).toLocaleTimeString()}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="bg-white/20 hover:bg-white/30 text-white border-white/30"
+                  onClick={() => setWeaponAlert(null)}
+                >
+                  <X className="w-4 h-4 mr-1" />
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Live Visitor Camera View */}
         {activeSession && (
           <section className="mb-8">
@@ -301,14 +405,10 @@ export default function Dashboard() {
             </div>
             <div className="bg-card rounded-xl border-2 border-primary/30 p-4">
               <div className="flex flex-col md:flex-row gap-4">
-                {/* Visitor snapshot */}
+                {/* Visitor live stream */}
                 <div className="w-full md:w-80 h-60 rounded-lg overflow-hidden bg-muted relative">
-                  {activeSession.imageUrl ? (
-                    <img
-                      src={getAssetUrl(activeSession.imageUrl)}
-                      alt="Visitor at door"
-                      className="w-full h-full object-cover"
-                    />
+                  {activeSession && activeSession.sessionId ? (
+                    <LiveStreamView sessionId={activeSession.sessionId} fallbackUrl={activeSession.imageUrl ? getAssetUrl(activeSession.imageUrl) : undefined} />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
                       <Users className="w-12 h-12 text-muted-foreground/50" />
@@ -317,7 +417,7 @@ export default function Dashboard() {
                   )}
                   <div className="absolute top-2 left-2 bg-red-500/90 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
                     <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
-                    Session: {activeSession.sessionId.slice(0, 16)}
+                    Session: {activeSession?.sessionId.slice(0, 16) || 'N/A'}
                   </div>
                 </div>
 
@@ -506,5 +606,71 @@ export default function Dashboard() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * LiveStreamView — polls the snapshot endpoint with fetch + blob URLs.
+ * Waits for each frame to load before requesting the next one so we never
+ * pile up queued requests or hit stale-timeout bugs.
+ */
+function LiveStreamView({ sessionId, fallbackUrl }: { sessionId: string; fallbackUrl?: string }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [consecutiveErrors, setConsecutiveErrors] = useState(0);
+  const MAX_ERRORS_BEFORE_FALLBACK = 15; // ~3-4 s of failures at 250ms each
+
+  useEffect(() => {
+    let active = true;
+    let currentBlobUrl: string | null = null;
+
+    async function poll() {
+      while (active) {
+        try {
+          const res = await fetch(
+            `${LIVE_API_BASE}/api/stream/${sessionId}/snapshot?_t=${Date.now()}`,
+          );
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+          if (!active) break;
+
+          // Revoke previous blob URL to avoid memory leaks
+          if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+          currentBlobUrl = URL.createObjectURL(blob);
+          setBlobUrl(currentBlobUrl);
+          setConsecutiveErrors(0); // reset on success
+        } catch {
+          if (!active) break;
+          setConsecutiveErrors((prev) => prev + 1);
+        }
+        // Wait before next poll — small gap keeps it smooth (~4 FPS)
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+
+    poll();
+
+    return () => {
+      active = false;
+      if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+    };
+  }, [sessionId]);
+
+  // Fall back to static image only after sustained errors and no frame ever loaded
+  if (consecutiveErrors >= MAX_ERRORS_BEFORE_FALLBACK && !blobUrl && fallbackUrl) {
+    return (
+      <img
+        src={fallbackUrl}
+        alt="Visitor at door"
+        className="w-full h-full object-cover"
+      />
+    );
+  }
+
+  return (
+    <img
+      src={blobUrl || fallbackUrl || ''}
+      alt="Live visitor stream"
+      className="w-full h-full object-cover"
+    />
   );
 }

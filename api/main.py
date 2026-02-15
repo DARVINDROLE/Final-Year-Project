@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -335,6 +336,213 @@ async def owner_reply(payload: AiReplyRequest) -> dict:
 @app.get("/api/logs")
 async def logs(limit: int = 50) -> dict:
     return app.state.orchestrator.get_logs(limit=limit)
+
+
+# ══════════════════════════════════════════════════════════════
+# Streaming — continuous video frames + live weapon detection
+# ══════════════════════════════════════════════════════════════
+
+# Store latest frame per session for MJPEG streaming
+_session_frames: dict[str, bytes] = {}
+_frame_timestamps: dict[str, float] = {}
+
+# Rate-limit weapon detection: run at most once per WEAPON_DETECT_INTERVAL seconds
+WEAPON_DETECT_INTERVAL = 0.4   # seconds — scan ~2.5 times per second
+WEAPON_CONF_THRESHOLD = 0.55   # confidence cutoff to avoid false positives
+WEAPON_CONSECUTIVE_HITS = 2    # require N consecutive positive frames before alerting
+_last_weapon_scan: dict[str, float] = {}
+_weapon_alert_sent: dict[str, bool] = {}  # avoid spamming alerts
+_weapon_hit_streak: dict[str, int] = {}   # consecutive positive detections per session
+
+
+def _run_weapon_detection_on_frame(frame_bytes: bytes) -> dict:
+    """Run the perception agent's weapon model on raw JPEG bytes.
+    Decodes in-memory (no disk I/O) and passes a numpy array to YOLO.
+    Returns {weapon_detected, weapon_confidence, weapon_labels}."""
+    import numpy as np
+    perception = app.state.orchestrator.perception_agent
+    if perception.weapon_model is None:
+        return {"weapon_detected": False, "weapon_confidence": 0.0, "weapon_labels": []}
+
+    try:
+        # Decode JPEG in memory → numpy array (no temp file needed)
+        img_array = np.frombuffer(frame_bytes, dtype=np.uint8)
+        try:
+            import cv2
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        except ImportError:
+            from PIL import Image
+            import io
+            img = np.array(Image.open(io.BytesIO(frame_bytes)).convert("RGB"))
+
+        if img is None:
+            return {"weapon_detected": False, "weapon_confidence": 0.0, "weapon_labels": []}
+
+        # Run YOLO on numpy array directly (skips disk read)
+        results = perception.weapon_model.predict(
+            source=img,
+            imgsz=640,
+            conf=WEAPON_CONF_THRESHOLD,
+            device="cpu",
+            half=False,
+            verbose=False,
+        )
+        detected = False
+        top_confidence = 0.0
+        labels: list[str] = []
+        for result in results:
+            boxes = getattr(result, "boxes", None)
+            if boxes is None or boxes.conf is None:
+                continue
+            for idx in range(len(boxes.conf)):
+                confidence = float(boxes.conf[idx])
+                if confidence < WEAPON_CONF_THRESHOLD:
+                    continue
+                class_id = int(boxes.cls[idx])
+                label = str(result.names[class_id])
+                detected = True
+                top_confidence = max(top_confidence, confidence)
+                labels.append(label)
+
+        return {
+            "weapon_detected": detected,
+            "weapon_confidence": top_confidence,
+            "weapon_labels": labels,
+        }
+    except Exception as exc:
+        logger.debug("Weapon detection on frame failed: %s", exc)
+        return {"weapon_detected": False, "weapon_confidence": 0.0, "weapon_labels": []}
+
+
+@app.post("/api/session/{session_id}/stream-frame")
+async def stream_frame(session_id: str, request: Request) -> dict:
+    """
+    Receive a frame from the doorbell camera to stream to the owner.
+    Also runs weapon detection periodically and broadcasts alerts.
+    """
+    try:
+        body = await request.json()
+        frame_base64 = body.get("frame_base64", "")
+
+        if not frame_base64:
+            raise HTTPException(status_code=400, detail="Missing frame_base64")
+
+        # Decode and store frame
+        frame_data = base64.b64decode(frame_base64)
+        _session_frames[session_id] = frame_data
+        now = datetime.now(timezone.utc).timestamp()
+        _frame_timestamps[session_id] = now
+
+        # ── Periodic weapon detection on live frames ──────────────
+        weapon_result = None
+        last_scan = _last_weapon_scan.get(session_id, 0.0)
+        if (now - last_scan) >= WEAPON_DETECT_INTERVAL:
+            _last_weapon_scan[session_id] = now
+            try:
+                weapon_result = await asyncio.wait_for(
+                    asyncio.to_thread(_run_weapon_detection_on_frame, frame_data),
+                    timeout=3,
+                )
+            except Exception as exc:
+                logger.debug("Live weapon scan failed: %s", exc)
+
+        # Track consecutive detections to avoid false positives
+        if weapon_result:
+            if weapon_result.get("weapon_detected"):
+                _weapon_hit_streak[session_id] = _weapon_hit_streak.get(session_id, 0) + 1
+            else:
+                _weapon_hit_streak[session_id] = 0  # reset on a clean frame
+
+        streak = _weapon_hit_streak.get(session_id, 0)
+        # Only alert after WEAPON_CONSECUTIVE_HITS consecutive positive frames
+        if weapon_result and weapon_result.get("weapon_detected") and streak >= WEAPON_CONSECUTIVE_HITS:
+            labels = weapon_result.get("weapon_labels", [])
+            confidence = weapon_result.get("weapon_confidence", 0.0)
+            logger.warning(
+                "⚠️ WEAPON DETECTED in live stream [%s]: %s (conf=%.2f, streak=%d)",
+                session_id, labels, confidence, streak,
+            )
+
+            # Broadcast to owner channel
+            await ws_manager.broadcast("owner", {
+                "type": "weapon_alert",
+                "sessionId": session_id,
+                "weapon_labels": labels,
+                "weapon_confidence": confidence,
+                "timestamp": now,
+            })
+
+            # Also broadcast to the session channel (for any session listeners)
+            await ws_manager.broadcast(session_id, {
+                "type": "weapon_alert",
+                "sessionId": session_id,
+                "weapon_labels": labels,
+                "weapon_confidence": confidence,
+                "timestamp": now,
+            })
+
+            # Log to DB actions table
+            try:
+                app.state.orchestrator.db.add_action(
+                    session_id=session_id,
+                    action_type="weapon_alert",
+                    payload={
+                        "weapon_labels": labels,
+                        "weapon_confidence": confidence,
+                        "source": "live_stream",
+                    },
+                    status="alert_sent",
+                    short_reason=f"Weapon detected in live stream: {', '.join(labels)}",
+                    agent_name="perception_agent",
+                )
+            except Exception:
+                pass
+
+            _weapon_alert_sent[session_id] = True
+
+        return {
+            "status": "frame received",
+            "sessionId": session_id,
+            "weapon_detected": bool(weapon_result and weapon_result.get("weapon_detected")),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error receiving stream frame: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to receive frame")
+
+
+@app.get("/api/stream/{session_id}")
+async def stream_mjpeg(session_id: str) -> StreamingResponse:
+    """
+    Stream live video frames from the doorbell as MJPEG.
+    Returns a stream of JPEG images with multipart/x-mixed-replace boundary.
+    """
+    async def frame_generator():
+        while True:
+            frame_data = _session_frames.get(session_id)
+            if frame_data:
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    b"\r\n" + frame_data + b"\r\n"
+                )
+            await asyncio.sleep(0.1)  # ~10 FPS output (frames arrive at ~5 FPS)
+
+    return StreamingResponse(
+        frame_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+@app.get("/api/stream/{session_id}/snapshot")
+async def stream_snapshot(session_id: str) -> Response:
+    """Return the latest JPEG frame for a session as a single image.
+    Used as a polling fallback when MJPEG streaming doesn't work."""
+    frame_data = _session_frames.get(session_id)
+    if not frame_data:
+        raise HTTPException(status_code=404, detail="No frames available for this session")
+    return Response(content=frame_data, media_type="image/jpeg")
 
 
 # ══════════════════════════════════════════════════════════════

@@ -14,6 +14,9 @@ interface TranscriptEntry {
   timestamp: string;
 }
 
+const STREAM_FRAME_INTERVAL = 200; // ms between frames (5 FPS)
+const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+
 export default function Doorbell() {
   const [state, setState] = useState<DoorbellState>('idle');
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -152,6 +155,47 @@ export default function Doorbell() {
       wsRef.current = null;
     };
   }, [sessionId]);
+
+  // ── Continuous frame streaming to API ───────────────────
+  useEffect(() => {
+    if (!sessionId || !webcamRef.current || !isCameraReady) return;
+
+    let intervalId: NodeJS.Timeout | null = null;
+    let isStreaming = true;
+
+    const streamFrames = async () => {
+      while (isStreaming && webcamRef.current) {
+        try {
+          const dataUrl = webcamRef.current.getScreenshot();
+          if (dataUrl) {
+            const frameBase64 = dataUrl.split(',')[1];
+            if (frameBase64) {
+              // Fire-and-forget: don't await the response so weapon detection
+              // on the backend doesn't block the next frame capture
+              fetch(`${API_BASE_URL}/api/session/${sessionId}/stream-frame`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frame_base64: frameBase64 }),
+              }).catch(() => {
+                // Silently ignore network errors during streaming
+              });
+            }
+          }
+        } catch (e) {
+          console.debug('Frame capture error:', e);
+        }
+        await new Promise((r) => setTimeout(r, STREAM_FRAME_INTERVAL));
+      }
+    };
+
+    // Start streaming
+    streamFrames();
+
+    return () => {
+      isStreaming = false;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [sessionId, isCameraReady]);
 
   // ── Message handling ───────────────────────────────────
   const handleSendMessage = useCallback(

@@ -37,7 +37,7 @@ def run_live_detection(headless=False):
                     print("Error: Failed to capture frame.")
                 break
 
-            results = yolo_model(frame, stream=True, verbose=False)
+            results = yolo_model(frame, stream=True, verbose=False, conf=0.55)
 
             weapon_detected = False
             for result in results:
@@ -46,7 +46,7 @@ def run_live_detection(headless=False):
                 detections = result.boxes.xyxy
 
                 for pos, detection in enumerate(detections):
-                    if conf[pos] >= 0.6:
+                    if conf[pos] >= 0.55:
                         weapon_detected = True
                         
                         if not headless:
