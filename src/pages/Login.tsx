@@ -4,43 +4,55 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { login } from '@/lib/api';
+import { useAuthContext } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { Bell, Lock, User, ArrowRight, Home } from 'lucide-react';
+import { Bell, Lock, User, ArrowRight, Home, UserPlus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function Login() {
+  const [isRegister, setIsRegister] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { login, register } = useAuthContext();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      const result = await login(username, password);
-      
-      if (result.success) {
+      let success: boolean;
+      if (isRegister) {
+        success = await register(username, password, name);
+      } else {
+        success = await login(username, password);
+      }
+
+      if (success) {
         toast({
-          title: 'Welcome back!',
-          description: 'Successfully logged in to the dashboard.',
+          title: isRegister ? 'Account created!' : 'Welcome back!',
+          description: isRegister
+            ? 'Your account has been created. Redirecting to dashboard.'
+            : 'Successfully logged in to the dashboard.',
         });
         navigate('/dashboard');
       } else {
         toast({
           variant: 'destructive',
-          title: 'Login failed',
-          description: 'Invalid username or password. Try admin/doorbell for demo.',
+          title: isRegister ? 'Registration failed' : 'Login failed',
+          description: isRegister
+            ? 'Username may already be taken. Please try a different one.'
+            : 'Invalid username or password.',
         });
       }
     } catch (error) {
       toast({
         variant: 'destructive',
         title: 'Error',
-        description: 'An error occurred. Please try again.',
+        description: error instanceof Error ? error.message : 'An error occurred. Please try again.',
       });
     } finally {
       setIsLoading(false);
@@ -50,7 +62,7 @@ export default function Login() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-br from-background via-background to-primary/5">
       {/* Back to doorbell link */}
-      <Link 
+      <Link
         to="/doorbell"
         className="absolute top-6 left-6 flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
       >
@@ -65,19 +77,38 @@ export default function Login() {
             <Home className="w-8 h-8 text-primary" />
           </div>
           <h1 className="text-2xl font-bold text-foreground">Owner Dashboard</h1>
-          <p className="text-muted-foreground text-sm">Kandell Residence Smart Doorbell</p>
+          <p className="text-muted-foreground text-sm">Smart Doorbell System</p>
         </div>
 
-        {/* Login Card */}
+        {/* Login/Register Card */}
         <Card className="border-border/50 shadow-lg">
           <CardHeader className="text-center">
-            <CardTitle className="text-xl">Sign In</CardTitle>
+            <CardTitle className="text-xl">{isRegister ? 'Create Account' : 'Sign In'}</CardTitle>
             <CardDescription>
-              Enter your credentials to access the dashboard
+              {isRegister
+                ? 'Register a new owner account'
+                : 'Enter your credentials to access the dashboard'}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
+              {isRegister && (
+                <div className="space-y-2">
+                  <Label htmlFor="name">Full Name</Label>
+                  <div className="relative">
+                    <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      id="name"
+                      type="text"
+                      placeholder="Enter your full name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="username">Username</Label>
                 <div className="relative">
@@ -106,39 +137,41 @@ export default function Login() {
                     onChange={(e) => setPassword(e.target.value)}
                     className="pl-10"
                     required
+                    minLength={4}
                   />
                 </div>
               </div>
 
-              <Button 
-                type="submit" 
-                className="w-full" 
-                disabled={isLoading}
-              >
+              <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? (
                   <span className="flex items-center gap-2">
                     <span className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                    Signing in...
+                    {isRegister ? 'Creating account...' : 'Signing in...'}
                   </span>
                 ) : (
                   <span className="flex items-center gap-2">
-                    Sign In
+                    {isRegister ? 'Create Account' : 'Sign In'}
                     <ArrowRight className="w-4 h-4" />
                   </span>
                 )}
               </Button>
             </form>
 
-            {/* Demo credentials hint */}
-            <div className="mt-6 p-3 rounded-lg bg-muted/50 border border-border">
-              <p className="text-xs text-muted-foreground text-center">
-                <strong>Demo credentials:</strong> admin / doorbell
-              </p>
+            {/* Toggle login / register */}
+            <div className="mt-6 text-center">
+              <button
+                onClick={() => {
+                  setIsRegister(!isRegister);
+                  setName('');
+                }}
+                className="text-sm text-primary hover:underline"
+              >
+                {isRegister ? 'Already have an account? Sign in' : "Don't have an account? Register"}
+              </button>
             </div>
           </CardContent>
         </Card>
 
-        {/* Footer */}
         <p className="text-center text-xs text-muted-foreground mt-6">
           Secure access to your Smart Doorbell system
         </p>

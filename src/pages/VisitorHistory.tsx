@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VisitorCard } from '@/components/VisitorCard';
-import { getVisitorLogs, isAuthenticated, type Visitor, getAssetUrl } from '@/lib/api';
+import { getVisitorLogs, type Visitor, getAssetUrl } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import {
   Bell,
@@ -44,16 +44,11 @@ export default function VisitorHistory() {
   const [typeFilter, setTypeFilter] = useState<VisitorType>('all');
   const [selectedVisitor, setSelectedVisitor] = useState<Visitor | null>(null);
 
-  const navigate = useNavigate();
   const { toast } = useToast();
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      navigate('/login');
-      return;
-    }
     loadVisitors();
-  }, [navigate]);
+  }, []);
 
   useEffect(() => {
     let filtered = visitors;

@@ -29,8 +29,37 @@ logger = logging.getLogger(__name__)
 # Maximum TTS text length (characters) — prevents extremely long speech
 MAX_TTS_LENGTH = 240
 
-# Default edge-tts voice — Indian English, female, natural-sounding
-EDGE_TTS_VOICE = "en-IN-NeerjaNeural"
+# Default edge-tts voices — auto-selected based on language detection
+EDGE_TTS_VOICE_EN = "en-IN-NeerjaNeural"      # Indian English, female
+EDGE_TTS_VOICE_HI = "hi-IN-SwaraNeural"        # Hindi, female
+
+
+def _detect_hindi(text: str) -> bool:
+    """Detect if text contains significant Hindi/Devanagari content."""
+    # Check for Devanagari Unicode block (U+0900–U+097F)
+    devanagari_count = sum(1 for ch in text if '\u0900' <= ch <= '\u097F')
+    if devanagari_count > 2:
+        return True
+    # Common romanized Hindi words that indicate Hindi speech
+    hindi_markers = [
+        'kya', 'hai', 'hain', 'nahi', 'nahin', 'kaise', 'kaun', 'kahan',
+        'aap', 'tum', 'mein', 'hum', 'yeh', 'woh', 'kuch', 'bahut',
+        'accha', 'theek', 'acha', 'namaste', 'dhanyavaad', 'shukriya',
+        'bhai', 'sahab', 'ji', 'abhi', 'karo', 'karna', 'raha', 'rahi',
+        'ghar', 'darwaza', 'khol', 'bata', 'bolo', 'suno', 'dedo',
+        'aana', 'jaana', 'milna', 'hoon', 'hoonga', 'karenge',
+        'madad', 'zaroor', 'bilkul', 'samajh', 'batao', 'bataye',
+    ]
+    words = text.lower().split()
+    hindi_word_count = sum(1 for w in words if w.strip('.,!?') in hindi_markers)
+    return hindi_word_count >= 2
+
+
+def _select_voice(text: str) -> str:
+    """Select the appropriate edge-tts voice based on text language."""
+    if _detect_hindi(text):
+        return EDGE_TTS_VOICE_HI
+    return EDGE_TTS_VOICE_EN
 
 
 # ──────────────────────────────────────────────────────────────
@@ -132,9 +161,10 @@ def play_tts_text(text: str) -> bool:
         edge_tts = importlib.import_module("edge_tts")
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
             tmp_path = tmp.name
+        voice = _select_voice(safe_text)
 
         async def _gen():
-            comm = edge_tts.Communicate(safe_text, EDGE_TTS_VOICE)
+            comm = edge_tts.Communicate(safe_text, voice)
             await comm.save(tmp_path)
 
         _run_async(_gen())
@@ -182,15 +212,16 @@ def _try_edge_tts(text: str, session_id: str, out_dir: Path, play: bool = False)
     try:
         edge_tts = importlib.import_module("edge_tts")
         mp3_path = out_dir / f"{session_id}.mp3"
+        voice = _select_voice(text)
 
         async def _generate():
-            communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
+            communicate = edge_tts.Communicate(text, voice)
             await communicate.save(str(mp3_path))
 
         _run_async(_generate())
 
         if mp3_path.exists() and mp3_path.stat().st_size > 0:
-            logger.info("TTS (edge-tts / %s) generated: %s", EDGE_TTS_VOICE, mp3_path)
+            logger.info("TTS (edge-tts / %s) generated: %s", voice, mp3_path)
 
             if play:
                 _play_audio(str(mp3_path))

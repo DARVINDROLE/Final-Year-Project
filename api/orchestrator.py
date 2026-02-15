@@ -83,12 +83,24 @@ class Orchestrator:
             agent_name="orchestrator",
         )
 
-        if session_id not in self.session_tasks or self.session_tasks[session_id].done():
-            self.session_tasks[session_id] = asyncio.create_task(self.handle_session(session_id))
+        # Run pipeline synchronously so we can return the greeting to the visitor
+        await self.handle_session(session_id)
+
+        # Fetch greeting from transcripts (intelligence agent's reply_text)
+        greeting = "Hello! Please wait while I notify the owner."
+        image_url = f"/static/snaps/{session_id}.jpg" if image_path else None
+        detail = self.db.get_session_detail(session_id)
+        if detail and detail.get("transcripts"):
+            for t in detail["transcripts"]:
+                if t.get("role") == "assistant":
+                    greeting = t["content"]
+                    break
 
         return {
             "sessionId": session_id,
-            "status": "queued",
+            "greeting": greeting,
+            "status": "completed",
+            "imageUrl": image_url,
             "imagePath": image_path,
             "audioPath": audio_path,
         }
@@ -184,9 +196,30 @@ class Orchestrator:
         timestamp = datetime.now(timezone.utc).isoformat()
         self.db.add_transcript(
             session_id=payload.session_id,
-            role="owner" if payload.owner else "assistant",
+            role="owner" if payload.owner else "visitor",
             content=payload.message,
             timestamp=timestamp,
+        )
+
+        # Generate an AI reply using the intelligence agent's conversational LLM
+        reply_text = ""
+        try:
+            reply_text = await self._generate_conversation_reply(
+                payload.session_id, payload.message, is_owner=payload.owner
+            )
+        except Exception as exc:
+            logger.warning("Conversation reply generation failed: %s", exc)
+
+        if not reply_text:
+            reply_text = "Thank you, the owner has been notified."
+
+        # Save the AI reply as a transcript
+        reply_ts = datetime.now(timezone.utc).isoformat()
+        self.db.add_transcript(
+            session_id=payload.session_id,
+            role="assistant",
+            content=reply_text,
+            timestamp=reply_ts,
         )
 
         action_status = "logged"
@@ -206,6 +239,61 @@ class Orchestrator:
             "sessionId": payload.session_id,
             "status": action_status,
             "timestamp": timestamp,
+            "reply": reply_text,
+        }
+
+    async def _generate_conversation_reply(
+        self, session_id: str, message: str, is_owner: bool = False
+    ) -> str:
+        """Generate an AI reply using the intelligence agent's Groq LLM
+        with full conversation context."""
+        # Get conversation history
+        detail = self.db.get_session_detail(session_id)
+        history = []
+        if detail and detail.get("transcripts"):
+            for t in detail["transcripts"]:
+                role = t.get("role", "visitor")
+                content = t.get("content", "")
+                if role == "assistant":
+                    history.append({"role": "assistant", "content": content})
+                elif role == "owner":
+                    history.append({"role": "user", "content": f"[Owner says]: {content}"})
+                else:
+                    history.append({"role": "user", "content": f"[Visitor says]: {content}"})
+
+        return await self.intelligence_agent.generate_conversation_reply(
+            session_id, message, history, is_owner=is_owner
+        )
+
+    async def transcribe_audio(self, audio_base64: str) -> dict:
+        """Transcribe audio using the perception agent's STT pipeline.
+        Returns {transcript, confidence}."""
+        # Save to a temp file
+        tmp_dir = Path("data/tmp/transcribe")
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = tmp_dir / f"audio_{uuid4().hex[:8]}.wav"
+
+        try:
+            audio_bytes = base64.b64decode(audio_base64.strip())
+        except Exception as e:
+            raise ValueError(f"Invalid base64 audio data: {e}")
+
+        await asyncio.to_thread(tmp_path.write_bytes, audio_bytes)
+
+        try:
+            transcript, confidence = await asyncio.to_thread(
+                self.perception_agent._stt_sync, str(tmp_path)
+            )
+        finally:
+            # Clean up temp file
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        return {
+            "transcript": transcript or "",
+            "confidence": round(confidence, 3),
         }
 
     def get_logs(self, limit: int = 50) -> dict:

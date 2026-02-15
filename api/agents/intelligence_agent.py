@@ -326,6 +326,85 @@ class IntelligenceAgent(BaseAgent):
 
         return canned
 
+    # ------------------------------------------------------------------
+    # Conversation follow-up reply (for multi-turn chat)
+    # ------------------------------------------------------------------
+
+    async def generate_conversation_reply(
+        self,
+        session_id: str,
+        message: str,
+        conversation_history: list[dict],
+        is_owner: bool = False,
+    ) -> str:
+        """Generate a reply in the context of an ongoing conversation.
+
+        Uses Groq LLM with conversation history. Falls back to a canned reply
+        if the LLM is unavailable.
+        """
+        if not self._groq_client:
+            return self._canned_reply(self._classify_intent(message.lower()))
+
+        try:
+            reply = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._call_groq_conversation, message, conversation_history, is_owner
+                ),
+                timeout=8,
+            )
+            if reply:
+                return reply
+        except asyncio.TimeoutError:
+            logger.warning("Groq conversation API timed out")
+        except Exception as exc:
+            logger.warning("Groq conversation call failed: %s", exc)
+
+        return self._canned_reply(self._classify_intent(message.lower()))
+
+    def _call_groq_conversation(
+        self, message: str, history: list[dict], is_owner: bool = False
+    ) -> str:
+        """Call Groq LLM with conversation history for multi-turn chat."""
+        messages = [{"role": "system", "content": self._system_prompt}]
+
+        # Add conversation history (last 10 messages for context window efficiency)
+        for entry in history[-10:]:
+            messages.append({
+                "role": entry.get("role", "user"),
+                "content": entry.get("content", ""),
+            })
+
+        # Add the current message
+        prefix = "[Owner says]" if is_owner else "[Visitor says]"
+        messages.append({"role": "user", "content": f"{prefix}: {message}"})
+
+        max_retries = 2
+        backoff = 0.5
+        last_error = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                response = self._groq_client.chat.completions.create(
+                    model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+                    messages=messages,
+                    max_tokens=150,
+                    temperature=0.3,
+                )
+                text = response.choices[0].message.content.strip()
+                if text:
+                    logger.info("Groq conversation reply (attempt %d): %s", attempt + 1, text[:80])
+                    return text
+            except Exception as exc:
+                last_error = exc
+                logger.warning("Groq conversation attempt %d/%d failed: %s", attempt + 1, max_retries + 1, exc)
+                if attempt < max_retries:
+                    import time
+                    time.sleep(backoff)
+                    backoff *= 2
+
+        logger.error("All Groq conversation retries exhausted. Last error: %s", last_error)
+        return ""
+
     def _call_groq(self, perception: PerceptionOutput) -> str:
         """Synchronous Groq API call with retry (runs in a thread)."""
         context = self._build_llm_context(perception)

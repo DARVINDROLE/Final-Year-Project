@@ -30,23 +30,17 @@ def test_ring_creates_session_in_sqlite(tmp_path, monkeypatch):
         assert response.status_code == 200
         payload = response.json()
         assert payload["sessionId"].startswith("visitor_")
-        assert payload["status"] == "queued"
+        # Ring is now synchronous — pipeline completes before returning
+        assert payload["status"] in ("completed", "queued")
+        assert "greeting" in payload
 
         session_id = payload["sessionId"]
-        statuses_seen = []
 
-        deadline = time.time() + 3
-        while time.time() < deadline:
-            status_response = client.get(f"/api/session/{session_id}/status")
-            assert status_response.status_code == 200
-            status_payload = status_response.json()
-            statuses_seen.append(status_payload["status"])
-            if status_payload["status"] == "completed":
-                break
-            time.sleep(0.1)
-
-        assert "queued" in statuses_seen or "processing" in statuses_seen
-        assert statuses_seen[-1] == "completed"
+        # Session should be completed (or at least processed) since ring is sync now
+        status_response = client.get(f"/api/session/{session_id}/status")
+        assert status_response.status_code == 200
+        status_payload = status_response.json()
+        assert status_payload["status"] == "completed"
 
 
 def test_session_id_auto_generation(tmp_path, monkeypatch):

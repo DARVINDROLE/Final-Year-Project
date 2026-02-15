@@ -57,7 +57,7 @@ export function TranscriptDisplay({
             >
               {entry.role === 'visitor' ? 'You' : 'Doorbell'}
             </p>
-            <p className="text-foreground/90 leading-relaxed">
+            <p className="text-white/90 leading-relaxed">
               {entry.content}
             </p>
           </div>
@@ -72,7 +72,7 @@ export function TranscriptDisplay({
           </div>
           <div className="flex-1">
             <p className="text-sm font-medium text-primary/70 mb-1">Speaking...</p>
-            <p className="text-foreground/60 italic">{currentTranscript}</p>
+            <p className="text-white/60 italic">{currentTranscript}</p>
           </div>
         </div>
       )}
