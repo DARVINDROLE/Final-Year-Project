@@ -268,10 +268,12 @@ class Orchestrator:
     async def transcribe_audio(self, audio_base64: str) -> dict:
         """Transcribe audio using the perception agent's STT pipeline.
         Returns {transcript, confidence}."""
-        # Save to a temp file
+        # Save to a temp file — use .webm extension since browser MediaRecorder
+        # produces audio/webm (Opus). Groq Whisper needs the correct extension
+        # to identify the format.
         tmp_dir = Path("data/tmp/transcribe")
         tmp_dir.mkdir(parents=True, exist_ok=True)
-        tmp_path = tmp_dir / f"audio_{uuid4().hex[:8]}.wav"
+        tmp_path = tmp_dir / f"audio_{uuid4().hex[:8]}.webm"
 
         try:
             audio_bytes = base64.b64decode(audio_base64.strip())
@@ -313,7 +315,9 @@ class Orchestrator:
     async def _save_audio(self, session_id: str, audio_base64: str) -> str:
         audio_dir = Path("data/tmp") / session_id
         audio_dir.mkdir(parents=True, exist_ok=True)
-        audio_path = audio_dir / "ring_audio.wav"
+        # Browser MediaRecorder produces audio/webm; use correct extension
+        # so Groq Whisper API can identify the format
+        audio_path = audio_dir / "ring_audio.webm"
         try:
             audio_bytes = base64.b64decode(audio_base64.strip())
         except Exception as e:
