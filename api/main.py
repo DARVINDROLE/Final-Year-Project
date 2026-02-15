@@ -98,6 +98,73 @@ async def startup_event() -> None:
     app.state.ws_manager = ws_manager
     # Ensure member photos directory exists
     Path("data/members").mkdir(parents=True, exist_ok=True)
+    # Start background inactivity checker
+    asyncio.create_task(_inactivity_checker_loop())
+
+
+async def _inactivity_checker_loop() -> None:
+    """Background loop that auto-ends sessions when no person is visible in the
+    camera feed for NO_PERSON_TIMEOUT seconds. This handles cases like a
+    delivery person leaving after dropping a package."""
+    while True:
+        try:
+            await asyncio.sleep(INACTIVITY_CHECK_INTERVAL)
+            now = datetime.now(timezone.utc).timestamp()
+            ended_sessions: list[str] = []
+
+            for sid in list(_active_sessions):
+                last_seen = _last_person_seen.get(sid, 0.0)
+                # Only trigger if we have a valid timestamp and the timeout elapsed
+                if last_seen > 0 and (now - last_seen) >= NO_PERSON_TIMEOUT:
+                    ended_sessions.append(sid)
+
+            for sid in ended_sessions:
+                logger.info(
+                    "Auto-ending session %s (no person visible for %.0fs)",
+                    sid, NO_PERSON_TIMEOUT,
+                )
+                _active_sessions.discard(sid)
+
+                # Update DB status to completed
+                try:
+                    _get_db().update_session(sid, "completed")
+                except Exception:
+                    pass
+
+                # Add a transcript entry so the conversation log shows it
+                try:
+                    _get_db().add_transcript(
+                        session_id=sid,
+                        role="assistant",
+                        content="Session ended automatically due to visitor inactivity.",
+                    )
+                except Exception:
+                    pass
+
+                # Notify owner dashboard
+                await ws_manager.broadcast("owner", {
+                    "type": "session_ended",
+                    "sessionId": sid,
+                    "reason": "inactivity",
+                })
+                # Notify the visitor's doorbell page
+                await ws_manager.broadcast(sid, {
+                    "type": "session_ended",
+                    "reason": "inactivity",
+                    "message": "Thank you! The session has ended due to inactivity. Have a great day!",
+                })
+
+                # Clean up frame data
+                _session_frames.pop(sid, None)
+                _frame_timestamps.pop(sid, None)
+                _last_person_seen.pop(sid, None)
+                _last_person_scan.pop(sid, None)
+                _last_weapon_scan.pop(sid, None)
+                _weapon_alert_sent.pop(sid, None)
+                _weapon_hit_streak.pop(sid, None)
+
+        except Exception as exc:
+            logger.error("Inactivity checker error: %s", exc)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -346,6 +413,14 @@ async def logs(limit: int = 50) -> dict:
 _session_frames: dict[str, bytes] = {}
 _frame_timestamps: dict[str, float] = {}
 
+# ── Inactivity auto-end (person-absence based) ─────────────────
+NO_PERSON_TIMEOUT = 20.0         # seconds with no person visible → auto-end
+INACTIVITY_CHECK_INTERVAL = 5.0  # how often the background loop runs
+PERSON_DETECT_INTERVAL = 2.0     # seconds between person-presence scans
+_active_sessions: set[str] = set()          # sessions currently streaming frames
+_last_person_seen: dict[str, float] = {}    # last time a person was detected per session
+_last_person_scan: dict[str, float] = {}    # rate-limiter for person detection
+
 # Rate-limit weapon detection: run at most once per WEAPON_DETECT_INTERVAL seconds
 WEAPON_DETECT_INTERVAL = 0.4   # seconds — scan ~2.5 times per second
 WEAPON_CONF_THRESHOLD = 0.55   # confidence cutoff to avoid false positives
@@ -355,26 +430,60 @@ _weapon_alert_sent: dict[str, bool] = {}  # avoid spamming alerts
 _weapon_hit_streak: dict[str, int] = {}   # consecutive positive detections per session
 
 
+def _decode_frame_to_numpy(frame_bytes: bytes):
+    """Decode JPEG bytes to a numpy array (BGR). Shared by weapon & person detection."""
+    import numpy as np
+    img_array = np.frombuffer(frame_bytes, dtype=np.uint8)
+    try:
+        import cv2
+        return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    except ImportError:
+        from PIL import Image
+        import io
+        return np.array(Image.open(io.BytesIO(frame_bytes)).convert("RGB"))
+
+
+def _run_person_detection_on_frame(frame_bytes: bytes) -> bool:
+    """Run the general YOLOv8n model to check if a person is visible.
+    Returns True if at least one person is detected with conf >= 0.40."""
+    perception = app.state.orchestrator.perception_agent
+    if perception.vision_model is None:
+        return True  # if no model loaded, assume person present (safe default)
+
+    try:
+        img = _decode_frame_to_numpy(frame_bytes)
+        if img is None:
+            return True
+
+        results = perception.vision_model.predict(
+            source=img,
+            imgsz=416,
+            conf=0.40,
+            classes=[0],   # class 0 = person in COCO
+            device="cpu",
+            half=False,
+            verbose=False,
+        )
+        for result in results:
+            boxes = getattr(result, "boxes", None)
+            if boxes is not None and len(boxes.conf) > 0:
+                return True
+        return False
+    except Exception as exc:
+        logger.debug("Person detection on frame failed: %s", exc)
+        return True  # assume present on error (don't accidentally end session)
+
+
 def _run_weapon_detection_on_frame(frame_bytes: bytes) -> dict:
     """Run the perception agent's weapon model on raw JPEG bytes.
     Decodes in-memory (no disk I/O) and passes a numpy array to YOLO.
     Returns {weapon_detected, weapon_confidence, weapon_labels}."""
-    import numpy as np
     perception = app.state.orchestrator.perception_agent
     if perception.weapon_model is None:
         return {"weapon_detected": False, "weapon_confidence": 0.0, "weapon_labels": []}
 
     try:
-        # Decode JPEG in memory → numpy array (no temp file needed)
-        img_array = np.frombuffer(frame_bytes, dtype=np.uint8)
-        try:
-            import cv2
-            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-        except ImportError:
-            from PIL import Image
-            import io
-            img = np.array(Image.open(io.BytesIO(frame_bytes)).convert("RGB"))
-
+        img = _decode_frame_to_numpy(frame_bytes)
         if img is None:
             return {"weapon_detected": False, "weapon_confidence": 0.0, "weapon_labels": []}
 
@@ -432,7 +541,24 @@ async def stream_frame(session_id: str, request: Request) -> dict:
         _session_frames[session_id] = frame_data
         now = datetime.now(timezone.utc).timestamp()
         _frame_timestamps[session_id] = now
+        _active_sessions.add(session_id)  # mark as actively streaming
+        # Initialise person-seen timestamp on first frame
+        if session_id not in _last_person_seen:
+            _last_person_seen[session_id] = now
 
+        # ── Periodic person-presence detection ─────────────────────
+        last_pscan = _last_person_scan.get(session_id, 0.0)
+        if (now - last_pscan) >= PERSON_DETECT_INTERVAL:
+            _last_person_scan[session_id] = now
+            try:
+                person_found = await asyncio.wait_for(
+                    asyncio.to_thread(_run_person_detection_on_frame, frame_data),
+                    timeout=3,
+                )
+                if person_found:
+                    _last_person_seen[session_id] = now
+            except Exception as exc:
+                logger.debug("Person detection scan failed: %s", exc)
         # ── Periodic weapon detection on live frames ──────────────
         weapon_result = None
         last_scan = _last_weapon_scan.get(session_id, 0.0)

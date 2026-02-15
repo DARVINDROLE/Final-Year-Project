@@ -125,6 +125,16 @@ export default function Dashboard() {
           });
           setTimeout(() => setWeaponAlert(null), 30000);
         }
+        // Auto-end: visitor went inactive (e.g. delivery person left)
+        if (data.type === 'session_ended') {
+          const sid = data.sessionId as string;
+          setActiveSession((prev) => (prev?.sessionId === sid ? null : prev));
+          toastRef.current({
+            title: 'Session ended',
+            description: `Visitor session ended (${(data.reason as string) || 'inactive'}).`,
+          });
+          loadVisitorsRef.current();
+        }
       });
       wsRef.current = ws;
 

@@ -147,6 +147,22 @@ export default function Doorbell() {
         setTranscript((prev) => [...prev, entry]);
         speakText(String(data.message));
       }
+      // Auto-end when backend detects visitor inactivity (e.g. delivery person left)
+      if (data.type === 'session_ended') {
+        const msg = (data.message as string) || 'Session ended. Thank you!';
+        const entry: TranscriptEntry = {
+          role: 'doorbell',
+          content: msg,
+          timestamp: new Date().toISOString(),
+        };
+        setTranscript((prev) => [...prev, entry]);
+        speakText(msg);
+        setStatusMessage('Session ended — visitor inactive');
+        // Reset to idle after a short delay so the goodbye message plays
+        setTimeout(() => {
+          handleEndConversation();
+        }, 5000);
+      }
     });
     wsRef.current = ws;
 
