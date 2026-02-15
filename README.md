@@ -2,23 +2,36 @@
 
 An AI-powered smart doorbell system designed for **Indian households** that uses a multi-agent architecture to detect, classify, and respond to visitors in real-time. Supports Hindi, English, and Hinglish speech with automatic threat detection, scam prevention, and owner notification.
 
+Includes a full-featured **React frontend** with a visitor doorbell interface (webcam + mic), owner dashboard with live visitor view, member management, and real-time WebSocket notifications.
+
 ## Architecture
 
 ```
-┌─────────────┐     ┌───────────────────┐     ┌────────────────────┐
-│  Doorbell    │────▶│  Perception Agent  │────▶│ Intelligence Agent │
-│  (Camera +   │     │  • YOLOv8 vision   │     │  • Groq Whisper STT│
-│   Mic)       │     │  • Weapon detection │     │  • Intent classify │
-└─────────────┘     │  • Context flags    │     │  • Risk scoring    │
-                    └───────────────────┘     │  • LLM replies     │
-                                              └────────┬───────────┘
-                                                       │
-                    ┌───────────────────┐     ┌────────▼───────────┐
-                    │   Action Agent     │◀────│  Decision Agent    │
-                    │  • TTS generation  │     │  • 12 policy rules │
-                    │  • Notifications   │     │  • Escalation logic│
-                    │  • DB audit trail  │     │  • Indian scenarios│
-                    └───────────────────┘     └────────────────────┘
+┌──────────────────┐
+│   React Frontend  │
+│  (Doorbell + Dash)│
+│   port 8080       │
+└────────┬─────────┘
+         │  REST + WebSocket
+┌────────▼─────────┐
+│   FastAPI Backend │
+│   port 8000       │
+└────────┬─────────┘
+         │
+┌────────▼──────────┐     ┌────────────────────┐
+│  Perception Agent  │────▶│ Intelligence Agent  │
+│  • YOLOv8 vision   │     │  • Groq Whisper STT │
+│  • Weapon detection │     │  • Intent classify  │
+│  • Context flags    │     │  • Risk scoring     │
+└───────────────────┘     │  • LLM replies      │
+                           └────────┬───────────┘
+                                    │
+┌───────────────────┐     ┌────────▼───────────┐
+│   Action Agent     │◀────│  Decision Agent     │
+│  • edge-tts (Hi/En)│     │  • 12 policy rules  │
+│  • Notifications   │     │  • Escalation logic  │
+│  • DB audit trail  │     │  • Indian scenarios  │
+└───────────────────┘     └────────────────────┘
 ```
 
 ### Agent Pipeline
@@ -26,9 +39,9 @@ An AI-powered smart doorbell system designed for **Indian households** that uses
 | Agent | Role | Key Tech |
 |-------|------|----------|
 | **Perception** | Captures image + audio → detects objects, weapons, transcribes speech, infers emotion, detects context flags | YOLOv8, Groq Whisper (Hindi/English), VOSK (offline fallback) |
-| **Intelligence** | Classifies intent (13 categories), computes risk score, generates reply | Groq LLM (llama-3.3-70b), rule-based fallback, Hindi normalizer |
+| **Intelligence** | Classifies intent (13 categories), computes risk score, generates reply, multi-turn conversation | Groq LLM (llama-3.3-70b), rule-based fallback, Hindi normalizer |
 | **Decision** | Maps risk + intent → action using 12 policy rules | policy.yaml, threshold-based escalation |
-| **Action** | Executes decision: TTS, notifications, DB logging | pyttsx3/espeak TTS, SQLite audit trail |
+| **Action** | Executes decision: TTS, notifications, DB logging | edge-tts (Hindi/English auto-detect), SQLite audit trail |
 
 ### 13 Intent Categories
 
@@ -36,13 +49,16 @@ An AI-powered smart doorbell system designed for **Indian households** that uses
 
 ## Tech Stack
 
-- **Frontend**: React + TypeScript + Vite + Tailwind CSS + shadcn-ui
-- **Backend**: FastAPI (Python 3.11) + SQLite
-- **Vision**: YOLOv8n (general detection) + custom weapon model
-- **STT**: Groq Whisper API (whisper-large-v3-turbo) with VOSK offline fallback
-- **LLM**: Groq API (llama-3.3-70b-versatile)
-- **TTS**: pyttsx3 (Windows) / espeak (Raspberry Pi)
-- **Hindi Support**: Devanagari → Roman normalizer for keyword matching
+| Layer | Technology |
+|-------|-----------|
+| **Frontend** | React 18 + TypeScript + Vite + Tailwind CSS + shadcn/ui |
+| **Backend** | FastAPI (Python 3.11) + SQLite + WebSocket |
+| **Vision** | YOLOv8n (general detection) + custom weapon model |
+| **STT** | Groq Whisper API (whisper-large-v3-turbo) + VOSK offline fallback |
+| **LLM** | Groq API (llama-3.3-70b-versatile) |
+| **TTS** | edge-tts (Hindi `hi-IN-SwaraNeural` / English `en-IN-NeerjaNeural`) |
+| **Hindi Support** | Devanagari → Roman normalizer for keyword matching |
+| **Auth** | Token-based auth with pbkdf2_hmac SHA-256 |
 
 ---
 
@@ -50,47 +66,84 @@ An AI-powered smart doorbell system designed for **Indian households** that uses
 
 ### Prerequisites
 
-- Python 3.11+ (`py -3.11` on Windows)
-- Node.js 18+ and npm
+- **Python 3.11+** (`py -3.11` on Windows)
+- **Node.js 18+** and npm
+- **Groq API key** — get one free at https://console.groq.com
 - Webcam + microphone (for live testing)
 
-### Backend (API)
+### 1. Clone and enter the project
 
 ```powershell
-# Create virtual environment
+cd Final-Year-Project
+```
+
+### 2. Backend Setup
+
+```powershell
+# Create and activate virtual environment
 py -3.11 -m venv fyp-api
 fyp-api\Scripts\activate
+
+# Install Python dependencies
 pip install -r api/requirements.txt
 
-# Create data directories
-mkdir data\snaps, data\tts, data\logs, data\tmp -Force
+# Create required data directories
+mkdir data\snaps, data\tts, data\logs, data\tmp, data\members -Force
 ```
 
-### Environment Variables
+### 3. Environment Variables
 
-Create a `.env` file in project root:
+Create a `.env` file in the project root:
 
-```
+```env
 GROQ_API_KEY=your_groq_api_key_here
 ```
 
-### Start the API Server
+Optional variables:
+
+```env
+DOORBELL_DB_PATH=data/db.sqlite    # SQLite database location (default: data/db.sqlite)
+GROQ_MODEL=llama-3.3-70b-versatile # LLM model (default: llama-3.3-70b-versatile)
+```
+
+### 4. Start the Backend API
 
 ```powershell
 fyp-api\Scripts\activate
 python -m uvicorn api.main:app --reload --port 8000
 ```
 
-API docs: http://127.0.0.1:8000/docs
+The API is now running at **http://127.0.0.1:8000**
+- Swagger UI: http://127.0.0.1:8000/docs
+- Health check: http://127.0.0.1:8000/api/health
 
-### Frontend
+### 5. Frontend Setup
 
-```sh
+In a **separate terminal**:
+
+```powershell
+# Install Node dependencies
 npm install
+
+# Start the dev server
 npm run dev
 ```
 
-### VOSK Models (offline STT fallback)
+The frontend is now running at **http://localhost:8080**
+- Doorbell page: http://localhost:8080/doorbell
+- Owner dashboard: http://localhost:8080/ (requires login)
+- Member management: http://localhost:8080/members (requires login)
+
+> The Vite dev server proxies `/api` requests to `http://127.0.0.1:8000` automatically.
+
+### 6. Create an Owner Account
+
+Open the dashboard at http://localhost:8080 and click **Register** to create your owner account. This enables:
+- Viewing visitor logs and live visitor snapshots
+- Replying to visitors (text or voice)
+- Managing household members (name, phone, role, photo)
+
+### 7. VOSK Models (optional — offline STT fallback)
 
 Download from https://alphacephei.com/vosk/models and extract into `models/`:
 
@@ -100,19 +153,88 @@ models/
 └── vosk-model-small-hi-0.22/      # Hindi
 ```
 
+These are only needed if Groq API is unavailable (offline fallback).
+
+---
+
+## Frontend Pages
+
+| Route | Page | Description |
+|-------|------|-------------|
+| `/doorbell` | Visitor Doorbell | Ring button, webcam capture, mic recording, live transcript, TTS playback |
+| `/` | Owner Dashboard | Live visitor view with snapshot, visitor history, reply (text/voice), stats |
+| `/members` | Member Management | Add/edit/delete household members (name, phone, role, photo) |
+| `/history` | Visitor History | Full visitor log with transcripts and risk scores |
+
+---
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/auth/register` | Register a new owner account |
+| `POST` | `/api/auth/login` | Login and get auth token |
+| `POST` | `/api/auth/logout` | Invalidate token |
+| `GET` | `/api/auth/me` | Get current user |
+| `POST` | `/api/ring` | Ring the doorbell (image + audio → full pipeline) |
+| `POST` | `/api/transcribe` | Transcribe audio (Groq Whisper STT) |
+| `POST` | `/api/tts` | Generate TTS audio (Hindi/English auto-detect) |
+| `POST` | `/api/ai-reply` | Send follow-up message → get AI reply |
+| `POST` | `/api/owner-reply` | Owner replies to visitor |
+| `GET` | `/api/session/{id}/status` | Get session pipeline status |
+| `GET` | `/api/session/{id}/detail` | Get full session detail |
+| `GET` | `/api/logs` | Get recent visitor logs |
+| `GET/POST` | `/api/members` | List / create household members |
+| `PUT/DELETE` | `/api/members/{id}` | Update / delete a member |
+| `GET` | `/api/health` | Health check |
+| `WS` | `/api/ws/{channel}` | WebSocket (channels: `owner`, `{session_id}`) |
+
 ---
 
 ## Testing
 
-### Unit Tests (96 tests)
+### Run All Tests (96 tests)
 
 ```powershell
 fyp-api\Scripts\activate
-$env:DOORBELL_DISABLE_MODELS="1"
 python -m pytest api/tests/ -v
 ```
 
-Tests cover all 4 agents, 13 intents, 12 decision rules, TTS utility, Hindi normalization, and end-to-end pipeline integration.
+### Test by File
+
+```powershell
+# All agent tests (perception, intelligence, decision, action) — 78 tests
+python -m pytest api/tests/test_all_agents.py -v
+
+# Intelligence + Decision integration tests — 16 tests
+python -m pytest api/tests/test_intelligence_decision.py -v
+
+# FastAPI endpoint tests (ring, session, logs, auth) — 2 tests
+python -m pytest api/tests/test_main.py -v
+
+# Perception agent unit tests
+python -m pytest api/tests/test_perception.py -v
+```
+
+### Test Options
+
+```powershell
+# Run tests with short output
+python -m pytest api/tests/ -q
+
+# Stop on first failure
+python -m pytest api/tests/ -x
+
+# Run a specific test by name
+python -m pytest api/tests/test_all_agents.py -k "test_scam_otp"
+
+# Run with full traceback on failure
+python -m pytest api/tests/ -v --tb=long
+
+# Disable model loading for faster tests (uses stubs)
+$env:DOORBELL_DISABLE_MODELS="1"
+python -m pytest api/tests/ -v
+```
 
 ### Webcam Test (live camera → full pipeline)
 
@@ -179,38 +301,35 @@ Each scenario displays a prompt on screen telling you what to say, then validate
 | 17 | Visitor | Friend wants to meet owner | *"I want to speak with the owner please"* | `auto_reply` |
 | 18 | Entry Request | Delivery asking to enter | *"Lift use karna hai, andar aana padega"* | `escalate` |
 
-#### Example: Running Scenario 3 (OTP Scam)
+### Manual API Test (curl)
 
 ```powershell
-python api/tests/test_webcam_ring.py --voice --scenario 3
+# Health check
+curl http://127.0.0.1:8000/api/health
+
+# Ring the doorbell (no image/audio)
+curl -X POST http://127.0.0.1:8000/api/ring `
+  -H "Content-Type: application/json" `
+  -d '{"type":"ring","timestamp":"2026-02-15T12:00:00Z","device_id":"frontdoor-01"}'
+
+# Register an owner
+curl -X POST http://127.0.0.1:8000/api/auth/register `
+  -H "Content-Type: application/json" `
+  -d '{"username":"admin","password":"password123","name":"Owner"}'
+
+# Login
+curl -X POST http://127.0.0.1:8000/api/auth/login `
+  -H "Content-Type: application/json" `
+  -d '{"username":"admin","password":"password123"}'
+
+# Get visitor logs
+curl http://127.0.0.1:8000/api/logs
+
+# Transcribe audio (base64-encoded audio)
+curl -X POST http://127.0.0.1:8000/api/tts `
+  -H "Content-Type: application/json" `
+  -d '{"text":"Namaste, kaise hain aap?","session_id":"test_hindi"}'
 ```
-
-```
-============================================================
-  SCENARIO 3: OTP scam attempt
-  Category: scam
-  Say: 'Sir OTP bata dijiye, delivery complete karna hai'
-  Expected: intent=scam_attempt, action=escalate
-============================================================
-
-  [MIC] Recording started... speak now
-  [MIC] Recording stopped — 4.4s captured
-
-  RESULT:
-    Transcript: "सर ओटीपी बता दिजे डिलिवरी कमप्लीट करना है"
-    AI Reply:   "I cannot share any OTP, bank details, or personal information.
-                 The owner has been notified."
-    Risk Score: 1.0
-    Actions:    ['escalate', 'escalation_notification']
-    Status: ✅ PASS
-```
-
-The system correctly:
-1. Transcribed Hindi speech via Groq Whisper
-2. Normalized Devanagari → Roman keywords (`ओटीपी` → `otp`)
-3. Classified intent as `scam_attempt` (risk: 1.0)
-4. Escalated with security notification
-5. Replied with a safe canned message (no OTP/bank info shared)
 
 ### Manual API Test (Swagger UI)
 
@@ -219,41 +338,75 @@ The system correctly:
    ```json
    {
      "type": "ring",
-     "timestamp": "2026-02-14T12:00:00Z",
+     "timestamp": "2026-02-15T12:00:00Z",
      "device_id": "frontdoor-01"
    }
    ```
 3. Copy the `sessionId` from response
-4. Try `GET /api/session/{sessionId}/status` to watch pipeline progress
+4. Try `GET /api/session/{sessionId}/detail` to see full pipeline results
+
+### Frontend Build Test
+
+```powershell
+# TypeScript type check (should produce no errors)
+npx tsc --noEmit
+
+# Production build (should compile 1733+ modules)
+npm run build
+
+# Preview production build
+npm run preview
+```
 
 ---
 
 ## Project Structure
 
 ```
-api/
-├── agents/
-│   ├── perception_agent.py    # Vision + STT + context flags
-│   ├── intelligence_agent.py  # Intent + risk + LLM reply
-│   ├── decision_agent.py      # Policy rules → action
-│   └── action_agent.py        # TTS + notifications + DB logging
-├── utils/
-│   ├── tts.py                 # TTS audio generation
-│   └── hindi_normalize.py     # Devanagari → Roman normalizer
-├── policies/
-│   └── policy.yaml            # Decision rules + thresholds
-├── prompts/
-│   └── groq_system_prompt.txt # LLM system prompt (45 rules)
-├── tests/
-│   ├── test_all_agents.py     # 78 comprehensive agent tests
-│   ├── test_intelligence_decision.py
-│   ├── test_webcam_ring.py    # Live webcam + 18 scenario tests
-│   └── ...
-├── db.py                      # SQLite database layer
-├── models.py                  # Pydantic models
-├── orchestrator.py            # Agent pipeline orchestrator
-└── main.py                    # FastAPI app
-src/                           # React frontend
-weapon_detection/              # Custom weapon detection model
-models/                        # VOSK STT models
+├── api/                           # Python backend
+│   ├── agents/
+│   │   ├── perception_agent.py    # Vision + STT + context flags
+│   │   ├── intelligence_agent.py  # Intent + risk + LLM reply + conversation
+│   │   ├── decision_agent.py      # Policy rules → action
+│   │   └── action_agent.py        # TTS + notifications + DB logging
+│   ├── utils/
+│   │   ├── tts.py                 # TTS audio generation (Hindi/English)
+│   │   └── hindi_normalize.py     # Devanagari → Roman normalizer
+│   ├── policies/
+│   │   └── policy.yaml            # Decision rules + thresholds
+│   ├── prompts/
+│   │   └── groq_system_prompt.txt # LLM system prompt
+│   ├── tests/
+│   │   ├── test_all_agents.py     # 78 comprehensive agent tests
+│   │   ├── test_intelligence_decision.py  # 16 integration tests
+│   │   ├── test_main.py           # 2 FastAPI endpoint tests
+│   │   ├── test_perception.py     # Perception unit tests
+│   │   └── test_webcam_ring.py    # Live webcam + 18 scenario tests
+│   ├── db.py                      # SQLite database layer
+│   ├── models.py                  # Pydantic models
+│   ├── orchestrator.py            # Agent pipeline orchestrator
+│   └── main.py                    # FastAPI app + all endpoints
+├── src/                           # React frontend
+│   ├── pages/
+│   │   ├── Doorbell.tsx           # Visitor doorbell interface
+│   │   ├── Dashboard.tsx          # Owner dashboard + live view
+│   │   ├── Members.tsx            # Member management
+│   │   ├── VisitorHistory.tsx     # Visitor history
+│   │   └── Login.tsx              # Auth (login/register)
+│   ├── lib/
+│   │   └── api.ts                 # API client (REST + WebSocket + TTS)
+│   ├── contexts/
+│   │   └── AuthContext.tsx         # Auth state management
+│   └── components/                # Reusable UI components
+├── data/                          # Runtime data (gitignored)
+│   ├── snaps/                     # Visitor snapshots
+│   ├── tts/                       # Generated TTS audio files
+│   ├── logs/                      # Agent logs
+│   ├── members/                   # Member photos
+│   └── tmp/                       # Temporary session files
+├── models/                        # VOSK STT models (offline)
+├── weapon_detection/              # Custom weapon detection model
+├── .env                           # API keys (not committed)
+├── package.json                   # Node dependencies
+└── api/requirements.txt           # Python dependencies
 ```
