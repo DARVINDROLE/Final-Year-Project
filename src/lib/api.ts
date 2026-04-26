@@ -1,5 +1,49 @@
 // ── API Configuration ────────────────────────────────────
-const API_BASE_URL = import.meta.env.PROD ? '' : (import.meta.env.VITE_API_URL || '');
+
+const LOCAL_API_ORIGINS = new Set([
+  'http://localhost:8000',
+  'http://127.0.0.1:8000',
+]);
+
+function normalizeBaseUrl(url: string): string {
+  return url.trim().replace(/\/$/, '');
+}
+
+function getBrowserApiOrigin(): string {
+  if (typeof window === 'undefined') return 'http://127.0.0.1:8000';
+  const apiProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  return `${apiProtocol}//${window.location.hostname}:8000`;
+}
+
+function resolveApiBaseUrl(): string {
+  const configured = normalizeBaseUrl(import.meta.env.VITE_API_URL || '');
+
+  if (!configured) {
+    // In local dev, prefer the Vite proxy when no explicit backend URL is set.
+    return import.meta.env.DEV ? '' : getBrowserApiOrigin();
+  }
+
+  // When the app is opened from another device (e.g. laptop -> Raspberry Pi),
+  // a hardcoded localhost backend points to the viewer's machine instead of the Pi.
+  if (
+    LOCAL_API_ORIGINS.has(configured) &&
+    typeof window !== 'undefined' &&
+    !['localhost', '127.0.0.1'].includes(window.location.hostname)
+  ) {
+    return getBrowserApiOrigin();
+  }
+
+  return configured;
+}
+
+function getWebSocketOrigin(): string {
+  const httpOrigin = API_BASE_URL || getBrowserApiOrigin();
+  const url = new URL(httpOrigin);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.origin;
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 // ── Types ────────────────────────────────────────────────
 
@@ -393,11 +437,7 @@ export function connectWebSocket(
   channel: string,
   onMessage: (data: Record<string, unknown>) => void,
 ): WebSocket {
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsHost = import.meta.env.PROD
-    ? window.location.host
-    : 'localhost:8000';
-  const ws = new WebSocket(`${wsProtocol}//${wsHost}/api/ws/${channel}`);
+  const ws = new WebSocket(`${getWebSocketOrigin()}/api/ws/${channel}`);
 
   ws.onmessage = (event) => {
     try {

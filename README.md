@@ -117,6 +117,18 @@ The API is now running at **http://127.0.0.1:8000**
 - Swagger UI: http://127.0.0.1:8000/docs
 - Health check: http://127.0.0.1:8000/api/health
 
+#### Raspberry Pi note
+
+If you open the frontend from another device on your network, start the backend on the Pi with:
+
+```powershell
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+- Avoid `--reload` on Raspberry Pi unless you are actively editing code.
+- Verify the backend locally on the Pi first with `http://127.0.0.1:8000/api/health`.
+- Then access it from your laptop with `http://<pi-ip>:8000/api/health`.
+
 ### 5. Frontend Setup
 
 In a **separate terminal**:
@@ -135,6 +147,8 @@ The frontend is now running at **http://localhost:8080**
 - Member management: http://localhost:8080/members (requires login)
 
 > The Vite dev server proxies `/api` requests to `http://127.0.0.1:8000` automatically.
+
+If you access the Vite frontend from another device, the app now auto-resolves the backend to the same host on port `8000` when `VITE_API_URL` is still set to `localhost`.
 
 ### 6. Create an Owner Account
 
