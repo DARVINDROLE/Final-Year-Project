@@ -24,8 +24,14 @@ class PerceptionAgent(BaseAgent):
         self.vosk_model = self._load_vosk_model()
         self._groq_client = self._init_groq_client()
 
+    def _is_yolo_disabled(self) -> bool:
+        return os.getenv("DOORBELL_DISABLE_YOLO", "0") == "1"
+
     def _load_vision_model(self):
         if os.getenv("DOORBELL_DISABLE_MODELS", "0") == "1":
+            return None
+        if self._is_yolo_disabled():
+            logger.warning("DOORBELL_DISABLE_YOLO=1 — skipping general YOLO model loading")
             return None
 
         try:
@@ -41,6 +47,9 @@ class PerceptionAgent(BaseAgent):
 
     def _load_weapon_model(self):
         if os.getenv("DOORBELL_DISABLE_MODELS", "0") == "1":
+            return None
+        if self._is_yolo_disabled():
+            logger.warning("DOORBELL_DISABLE_YOLO=1 — skipping weapon YOLO model loading")
             return None
 
         try:
