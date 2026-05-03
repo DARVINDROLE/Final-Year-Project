@@ -1,48 +1,50 @@
-(fyp-api) PS D:\Final-year-project\Final-Year-Project> python api/tests/test_webcam_ring.py --voice
-=======================================================
-  Smart Doorbell - Webcam + Voice Test
-=======================================================
-  Mode: IMAGE + VOICE (record with R, capture with SPACE)
+PS D:\Final-year-project\Final-Year-Project> fyp-api\Scripts\activate
+(fyp-api) PS D:\Final-year-project\Final-Year-Project> python api/tests/test_webcam_ring.py      
+============================================================
+  Smart Doorbell - Webcam + Voice + Scenario Test
+============================================================
+  Mode: IMAGE ONLY   (capture with SPACE)
+  Tip:  Run with --voice to enable mic recording & TTS playback
+  Tip:  Run with --scenario to test Indian household scenarios
 
 === Webcam Preview ===
-Press R to START/STOP voice recording (then SPACE to send)
 Press SPACE to capture image and send to doorbell API
 Press Q to quit without sending
 ======================
 
-  [MIC] Recording started... speak now
-  [MIC] Recording stopped — 6.5s captured
-Captured frame: 640x480, base64 size: 38764 chars
-Audio base64 size: 275856 chars
+Captured frame: 640x480, base64 size: 46632 chars
 
 Sending ring event to API...
 Ring response: {
-  "sessionId": "visitor_e6e23dae",
+  "sessionId": "visitor_93a444fd",
   "status": "queued",
-  "imagePath": "data/snaps/visitor_e6e23dae.jpg",
-  "audioPath": "data/tmp/visitor_e6e23dae/ring_audio.wav"
+  "imagePath": "data/snaps/visitor_93a444fd.jpg",
+  "audioPath": ""
 }
 
-Polling session visitor_e6e23dae...
+Polling session visitor_93a444fd...
   Status: processing
-  Status: perception_done
+  Status: intelligence_done
+  Status: decision_done
   Status: completed
 
 Final result: {
-  "sessionId": "visitor_e6e23dae",
+  "sessionId": "visitor_93a444fd",
   "status": "completed",
-  "lastUpdated": "2026-02-14T14:25:32.305401+00:00",
-  "riskScore": 0.255
+  "lastUpdated": "2026-02-15T07:11:46.210259+00:00",
+  "riskScore": 0.75
 }
 
 --- Pipeline completed successfully! ---
-  Risk Score: 0.255
+  Risk Score: 0.75
 
   Visitor said: (no transcript — VOSK returned empty)
     Possible causes:
     - Mic volume too low or wrong input device
     - VOSK models not loaded (check server logs)
     - Recording too short (try speaking longer)
-  AI Reply:     "Please wait while I notify the owner."
+  AI Reply:     "I have notified the owner and the security guard."
 
-  [TTS] Speaking: "Please wait while I notify the owner."
+  (Run with --voice to hear TTS playback)
+  Actions:      ['escalate', 'escalation_notification', 'perception', 'ring_received']
+(fyp-api) PS D:\Final-year-project\Final-Year-Project> 
