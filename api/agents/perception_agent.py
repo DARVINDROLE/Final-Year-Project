@@ -12,6 +12,7 @@ from pathlib import Path
 from ..models import ObjectDetection, PerceptionOutput, RingEvent
 from ..utils.hindi_normalize import normalize_hindi_transcript
 from .base_agent import BaseAgent
+from .openthreat_detector import OpenThreatDetector
 
 logger = logging.getLogger(__name__)
 
@@ -45,29 +46,32 @@ class PerceptionAgent(BaseAgent):
         except Exception:
             return None
 
-    def _load_weapon_model(self):
+    def _load_weapon_model(self) -> OpenThreatDetector | None:
+        """Load the OpenThreatDetection weapon model adapter.
+
+        The adapter handles weight-path resolution (env override → openthreat dir
+        → legacy YOLO weights) and exposes `detect_from_path` /
+        `detect_from_array` regardless of the underlying framework.
+        """
         if os.getenv("DOORBELL_DISABLE_MODELS", "0") == "1":
             return None
         if self._is_yolo_disabled():
-            logger.warning("DOORBELL_DISABLE_YOLO=1 — skipping weapon YOLO model loading")
-            return None
-
-        try:
-            yolo_cls = importlib.import_module("ultralytics").YOLO
-
-            weapon_model_path = (
-                Path(__file__).resolve().parents[2]
-                / "weapon_detection"
-                / "runs"
-                / "detect"
-                / "Normal_Compressed"
-                / "weights"
-                / "best.pt"
+            logger.warning(
+                "DOORBELL_DISABLE_YOLO=1 — skipping OpenThreatDetector weapon model loading"
             )
-            if not weapon_model_path.exists():
+            return None
+        try:
+            detector = OpenThreatDetector()
+            if not detector.is_loaded:
+                logger.warning(
+                    "OpenThreatDetector: no weapon weights found "
+                    "(set OPENTHREAT_WEIGHTS_PATH or drop weights into "
+                    "weapon_detection/openthreat/weights/best.pt)"
+                )
                 return None
-            return yolo_cls(str(weapon_model_path))
-        except Exception:
+            return detector
+        except Exception as exc:
+            logger.warning("Failed to initialise OpenThreatDetector: %s", exc)
             return None
 
     def _load_vosk_model(self):
@@ -265,52 +269,10 @@ class PerceptionAgent(BaseAgent):
                 "vision_confidence": 0.5,
             }
 
-    def _weapon_detect_sync(self, image_path: str, conf_thres: float = 0.55) -> dict:
+    def _weapon_detect_sync(self, image_path: str, conf_thres: float = 0.35) -> dict:
         if not image_path or self.weapon_model is None:
-            return {
-                "weapon_detected": False,
-                "weapon_confidence": 0.0,
-                "weapon_labels": [],
-            }
-
-        try:
-            results = self.weapon_model.predict(
-                source=image_path,
-                imgsz=640,
-                conf=conf_thres,
-                device="cpu",
-                half=False,
-                verbose=False,
-            )
-            detected = False
-            top_confidence = 0.0
-            labels: list[str] = []
-
-            for result in results:
-                boxes = getattr(result, "boxes", None)
-                if boxes is None or boxes.conf is None:
-                    continue
-                for index in range(len(boxes.conf)):
-                    confidence = float(boxes.conf[index])
-                    if confidence < conf_thres:
-                        continue
-                    class_id = int(boxes.cls[index])
-                    label = str(result.names[class_id])
-                    detected = True
-                    top_confidence = max(top_confidence, confidence)
-                    labels.append(label)
-
-            return {
-                "weapon_detected": detected,
-                "weapon_confidence": top_confidence,
-                "weapon_labels": labels,
-            }
-        except Exception:
-            return {
-                "weapon_detected": False,
-                "weapon_confidence": 0.0,
-                "weapon_labels": [],
-            }
+            return dict(OpenThreatDetector.SAFE_DEFAULT)
+        return self.weapon_model.detect_from_path(image_path, conf=conf_thres)
 
     def _stt_sync(self, audio_path: str) -> tuple[str, float]:
         """Run Speech-to-Text — tries Groq Whisper API first (excellent Hindi/English),
@@ -693,6 +655,11 @@ class PerceptionAgent(BaseAgent):
             PIL_Draw = importlib.import_module("PIL.ImageDraw")
 
             img = PIL_Image.open(image_path)
+            # JPEG can't carry alpha — flatten RGBA / LA / palette images to RGB
+            # before drawing so the .jpg save below doesn't fail with
+            # "cannot write mode RGBA as JPEG".
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
             draw = PIL_Draw.Draw(img)
 
             # Draw detection labels in top-left corner

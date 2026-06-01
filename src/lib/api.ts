@@ -43,7 +43,7 @@ function getWebSocketOrigin(): string {
   return url.origin;
 }
 
-const API_BASE_URL = resolveApiBaseUrl();
+export const API_BASE_URL = resolveApiBaseUrl();
 
 // ── Types ────────────────────────────────────────────────
 
@@ -51,6 +51,11 @@ export interface User {
   id: number;
   username: string;
   name: string;
+  vacation_mode?: boolean;
+}
+
+export interface OwnerSettings {
+  vacation_mode: boolean;
 }
 
 export interface Visitor {
@@ -184,6 +189,24 @@ export async function getMe(): Promise<User | null> {
 
 export function isAuthenticated(): boolean {
   return !!getToken();
+}
+
+// ── Owner settings ───────────────────────────────────────
+
+export async function getOwnerSettings(): Promise<OwnerSettings> {
+  const res = await fetch(`${API_BASE_URL}/api/owner/settings`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch owner settings');
+  return res.json();
+}
+
+export async function setOwnerSettings(updates: Partial<OwnerSettings>): Promise<OwnerSettings> {
+  const res = await fetch(`${API_BASE_URL}/api/owner/settings`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error('Failed to update owner settings');
+  return res.json();
 }
 
 // ── Doorbell API ─────────────────────────────────────────

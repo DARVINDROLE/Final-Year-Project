@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getMe, login as apiLogin, register as apiRegister, logout as apiLogout, type User } from '@/lib/api';
+import {
+  getMe,
+  login as apiLogin,
+  register as apiRegister,
+  logout as apiLogout,
+  setOwnerSettings as apiSetOwnerSettings,
+  type User,
+} from '@/lib/api';
 
 interface AuthState {
   user: User | null;
@@ -55,6 +62,23 @@ export function useAuth() {
     setState({ user: null, loading: false, error: null });
   }, []);
 
+  const setVacationMode = useCallback(async (next: boolean) => {
+    // Optimistic update — revert if the API call fails so the UI doesn't lie.
+    setState((s) => (s.user ? { ...s, user: { ...s.user, vacation_mode: next } } : s));
+    try {
+      const settings = await apiSetOwnerSettings({ vacation_mode: next });
+      setState((s) =>
+        s.user ? { ...s, user: { ...s.user, vacation_mode: settings.vacation_mode } } : s,
+      );
+      return true;
+    } catch (err) {
+      setState((s) => (s.user ? { ...s, user: { ...s.user, vacation_mode: !next } } : s));
+      const msg = err instanceof Error ? err.message : 'Failed to update vacation mode';
+      setState((s) => ({ ...s, error: msg }));
+      return false;
+    }
+  }, []);
+
   return {
     user: state.user,
     loading: state.loading,
@@ -62,6 +86,7 @@ export function useAuth() {
     login,
     register,
     logout,
+    setVacationMode,
     checkAuth,
     isAuthenticated: !!state.user,
   };

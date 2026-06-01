@@ -4,7 +4,7 @@ import importlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Optional
 
 from ..models import DecisionOutput, IntelligenceOutput
 from .base_agent import BaseAgent
@@ -31,12 +31,29 @@ _DEFAULT_POLICY = {
 class DecisionAgent(BaseAgent):
     """Policy and business-logic layer — maps risk into concrete actions."""
 
-    def __init__(self, policy_path: str = "api/policies/policy.yaml") -> None:
+    def __init__(
+        self,
+        policy_path: str = "api/policies/policy.yaml",
+        owner_provider: Optional[Callable[[], Optional[dict]]] = None,
+    ) -> None:
         super().__init__("api/instructions/decision.md")
         self.policy = self._load_policy(policy_path)
         self._thresholds = self.policy.get("thresholds", _DEFAULT_POLICY["thresholds"])
         self._owner = self.policy.get("owner_defaults", _DEFAULT_POLICY["owner_defaults"])
         self._vacation = self.policy.get("vacation_overrides", _DEFAULT_POLICY["vacation_overrides"])
+        # Optional callback that returns the live owner record (with vacation_mode).
+        # When provided, takes precedence over the static policy.yaml default.
+        self._owner_provider = owner_provider
+
+    def _current_vacation_mode(self) -> bool:
+        if self._owner_provider is not None:
+            try:
+                owner = self._owner_provider()
+                if owner is not None:
+                    return bool(owner.get("vacation_mode", False))
+            except Exception as exc:
+                logger.debug("owner_provider failed: %s", exc)
+        return bool(self._owner.get("vacation_mode", False))
 
     # ------------------------------------------------------------------
     # Policy loading
@@ -69,7 +86,7 @@ class DecisionAgent(BaseAgent):
     def _active_thresholds(self) -> dict[str, float]:
         """Return effective thresholds, adjusted for vacation mode."""
         base = dict(self._thresholds)
-        if self._owner.get("vacation_mode", False):
+        if self._current_vacation_mode():
             base["escalate_risk"] = self._vacation.get(
                 "escalate_risk", base["escalate_risk"]
             )
@@ -99,6 +116,10 @@ class DecisionAgent(BaseAgent):
         escalate_risk = thresholds.get("escalate_risk", 0.7)
         auto_reply_max = thresholds.get("auto_reply_max_risk", 0.4)
         auto_reply_enabled = self._owner.get("auto_reply_enabled", True)
+        # Vacation Mode: visitor-side auto-reply is suppressed when the owner
+        # is away, so every visitor gets the owner's attention.
+        if self._current_vacation_mode():
+            auto_reply_enabled = False
         flags = context_flags or []
 
         # --- Rule 1: weapon → always escalate ---

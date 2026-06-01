@@ -14,6 +14,14 @@ export default defineConfig(({ mode }) => ({
         changeOrigin: true,
         secure: false,
       },
+      // FastAPI mounts visitor snapshots / TTS audio / member photos under /static/*.
+      // Without this proxy, the dev server returns 404 for those URLs and the doorbell
+      // can't play backend-generated TTS in dev mode.
+      '/static': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),

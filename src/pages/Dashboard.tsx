@@ -11,6 +11,7 @@ import {
   getAssetUrl,
   getSessionDetail,
   transcribeAudio,
+  API_BASE_URL,
 } from '@/lib/api';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -29,7 +30,9 @@ import {
   MessageSquare,
   UserCog,
   Eye,
+  Plane,
 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -39,10 +42,6 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-
-const LIVE_API_BASE = window.location.origin.includes('localhost') || window.location.hostname === '127.0.0.1'
-  ? 'http://localhost:8000'
-  : window.location.origin;
 
 export default function Dashboard() {
   const [visitors, setVisitors] = useState<Visitor[]>([]);
@@ -63,12 +62,22 @@ export default function Dashboard() {
     confidence: number;
     timestamp: number;
   } | null>(null);
+  const [vacationAlerts, setVacationAlerts] = useState<Array<{
+    sessionId: string;
+    imageUrl: string;
+    description: string;
+    timestamp: string;
+  }>>([]);
+  // Sessions the owner has explicitly dismissed — keeps the auto-detect fallback
+  // from immediately re-resurrecting them on the next render.
+  const [dismissedSessions, setDismissedSessions] = useState<Set<string>>(new Set());
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
 
-  const { user, logout } = useAuthContext();
+  const { user, logout, setVacationMode } = useAuthContext();
+  const vacationMode = !!user?.vacation_mode;
   const { toast } = useToast();
 
   // ── Load visitors ────────────────────────────────────────
@@ -125,6 +134,27 @@ export default function Dashboard() {
           });
           setTimeout(() => setWeaponAlert(null), 30000);
         }
+        // A new transcript line was saved (visitor said something OR owner replied).
+        // Refresh the visitor logs so the dashboard's transcript view picks it up.
+        if (data.type === 'transcript_updated') {
+          loadVisitorsRef.current();
+        }
+        // Vacation Mode: a person was confirmed at the door while owner is away.
+        if (data.type === 'person_detected') {
+          const sid = data.sessionId as string;
+          const imageUrl = (data.imageUrl as string) || '';
+          const description = (data.description as string) || 'Person detected at the door.';
+          const timestamp = (data.timestamp as string) || new Date().toISOString();
+          setVacationAlerts((prev) => [
+            { sessionId: sid, imageUrl, description, timestamp },
+            ...prev,
+          ].slice(0, 20));
+          toastRef.current({
+            title: 'Visitor at the door',
+            description,
+          });
+          loadVisitorsRef.current();
+        }
         // Auto-end: visitor went inactive (e.g. delivery person left)
         if (data.type === 'session_ended') {
           const sid = data.sessionId as string;
@@ -161,9 +191,12 @@ export default function Dashboard() {
   // ── Auto-detect active session from loaded visitors ──────
   // Fallback: if the WebSocket new_ring was missed (e.g. page loaded after ring),
   // pick up the latest active visitor session and show it as the live view.
+  // Skip sessions the owner already dismissed so Dismiss doesn't bounce back.
   useEffect(() => {
     if (activeSession) return; // already showing a live session
-    const active = visitors.find((v) => v.status === 'active');
+    const active = visitors.find(
+      (v) => v.status === 'active' && !dismissedSessions.has(v.id),
+    );
     if (active) {
       setActiveSession({
         sessionId: active.id,
@@ -171,7 +204,7 @@ export default function Dashboard() {
         greeting: active.transcript[0]?.content || '',
       });
     }
-  }, [visitors, activeSession]);
+  }, [visitors, activeSession, dismissedSessions]);
 
   // ── Handlers ─────────────────────────────────────────────
   const handleLogout = async () => {
@@ -301,6 +334,24 @@ export default function Dashboard() {
                   History
                 </Link>
               </Button>
+              <div
+                className={`flex items-center gap-2 px-2 py-1 rounded-md border ${
+                  vacationMode ? 'border-amber-500/60 bg-amber-500/10' : 'border-border'
+                }`}
+                title={
+                  vacationMode
+                    ? 'Vacation Mode is on — auto-reply is disabled and you will be notified about every visitor.'
+                    : 'Turn on Vacation Mode while you are away.'
+                }
+              >
+                <Plane className={`w-4 h-4 ${vacationMode ? 'text-amber-600' : 'text-muted-foreground'}`} />
+                <span className="text-sm">Vacation</span>
+                <Switch
+                  aria-label="Vacation Mode"
+                  checked={vacationMode}
+                  onCheckedChange={(next) => setVacationMode(next)}
+                />
+              </div>
               <Button variant="ghost" size="sm" onClick={handleLogout}>
                 <LogOut className="w-4 h-4 mr-1" />
                 Logout
@@ -359,6 +410,64 @@ export default function Dashboard() {
           </Button>
         </div>
 
+        {/* Vacation Mode Banner */}
+        {vacationMode && (
+          <div className="mb-6 bg-amber-500/10 border border-amber-500/40 rounded-xl p-4">
+            <div className="flex items-center gap-3">
+              <Plane className="w-5 h-5 text-amber-600" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">Vacation Mode active</h3>
+                <p className="text-sm text-muted-foreground">
+                  Auto-reply is disabled. You'll be notified for every visitor detected at the door.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setVacationMode(false)}
+              >
+                Turn off
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Recent Vacation Alerts */}
+        {vacationMode && vacationAlerts.length > 0 && (
+          <div className="mb-6 bg-card rounded-xl border border-border p-4">
+            <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+              <Bell className="w-4 h-4" />
+              Recent visitor alerts ({vacationAlerts.length})
+            </h3>
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {vacationAlerts.map((alert, idx) => (
+                <div
+                  key={`${alert.sessionId}-${alert.timestamp}-${idx}`}
+                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50"
+                >
+                  {alert.imageUrl ? (
+                    <img
+                      src={getAssetUrl(alert.imageUrl)}
+                      alt="Visitor snapshot"
+                      className="w-12 h-12 rounded-md object-cover border border-border"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-md bg-muted flex items-center justify-center">
+                      <Eye className="w-5 h-5 text-muted-foreground" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-foreground truncate">{alert.description}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {alert.sessionId.slice(0, 16)} • {new Date(alert.timestamp).toLocaleTimeString()}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Weapon Alert Banner */}
         {weaponAlert && (
           <div className="mb-6 bg-red-600 text-white rounded-xl border-2 border-red-400 p-4 animate-pulse shadow-lg shadow-red-500/30">
@@ -407,7 +516,16 @@ export default function Dashboard() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setActiveSession(null)}
+                onClick={() => {
+                  if (activeSession?.sessionId) {
+                    setDismissedSessions((prev) => {
+                      const next = new Set(prev);
+                      next.add(activeSession.sessionId);
+                      return next;
+                    });
+                  }
+                  setActiveSession(null);
+                }}
               >
                 <X className="w-4 h-4 mr-1" />
                 Dismiss
@@ -431,12 +549,45 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Greeting / quick actions */}
-                <div className="flex-1 flex flex-col gap-3">
-                  <div className="bg-muted/50 rounded-lg p-3">
-                    <p className="text-xs text-muted-foreground mb-1">AI Greeting</p>
-                    <p className="text-sm text-foreground">{activeSession.greeting || 'Processing...'}</p>
-                  </div>
+                {/* Live transcript / quick actions */}
+                <div className="flex-1 flex flex-col gap-3 min-h-[15rem]">
+                  {(() => {
+                    const liveVisitor = visitors.find((v) => v.id === activeSession.sessionId);
+                    const lines = liveVisitor?.transcript ?? [];
+                    if (lines.length === 0) {
+                      return (
+                        <div className="bg-muted/50 rounded-lg p-3">
+                          <p className="text-xs text-muted-foreground mb-1">AI Greeting</p>
+                          <p className="text-sm text-foreground">
+                            {activeSession.greeting || 'Processing...'}
+                          </p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <ScrollArea className="bg-muted/40 rounded-lg p-3 h-56">
+                        <div className="flex flex-col gap-2">
+                          {lines.map((line, idx) => (
+                            <div
+                              key={`${activeSession.sessionId}-${idx}`}
+                              className="text-sm"
+                            >
+                              <span
+                                className={
+                                  line.role === 'visitor'
+                                    ? 'text-blue-600 font-medium'
+                                    : 'text-muted-foreground font-medium'
+                                }
+                              >
+                                {line.role === 'visitor' ? 'Visitor' : 'Doorbell'}:
+                              </span>{' '}
+                              <span className="text-foreground">{line.content}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    );
+                  })()}
                   <div className="flex gap-2 mt-auto">
                     <Button
                       className="flex-1"
@@ -637,7 +788,7 @@ function LiveStreamView({ sessionId, fallbackUrl }: { sessionId: string; fallbac
       while (active) {
         try {
           const res = await fetch(
-            `${LIVE_API_BASE}/api/stream/${sessionId}/snapshot?_t=${Date.now()}`,
+            `${API_BASE_URL}/api/stream/${sessionId}/snapshot?_t=${Date.now()}`,
           );
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const blob = await res.blob();

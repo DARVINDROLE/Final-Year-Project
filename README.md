@@ -93,7 +93,13 @@ mkdir data\snaps, data\tts, data\logs, data\tmp, data\members -Force
 
 ### 3. Environment Variables
 
-Create a `.env` file in the project root:
+Copy the template and fill in your key:
+
+```sh
+cp .env.example .env
+```
+
+Then set your Groq key in `.env`:
 
 ```env
 GROQ_API_KEY=your_groq_api_key_here
@@ -104,7 +110,11 @@ Optional variables:
 ```env
 DOORBELL_DB_PATH=data/db.sqlite    # SQLite database location (default: data/db.sqlite)
 GROQ_MODEL=llama-3.3-70b-versatile # LLM model (default: llama-3.3-70b-versatile)
+DOORBELL_DISABLE_YOLO=1            # Skip loading the weapon/YOLO model
+DOORBELL_DISABLE_MODELS=1          # Skip loading all heavy models (Pi / tests)
 ```
+
+> **Security:** `.env` is git-ignored and must **never** be committed — it holds your live API key. Only `.env.example` (no real values) is tracked. If a key is ever committed, rotate it at https://console.groq.com and remove it from history before pushing.
 
 ### 4. Start the Backend API
 
@@ -128,6 +138,70 @@ python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 - Avoid `--reload` on Raspberry Pi unless you are actively editing code.
 - Verify the backend locally on the Pi first with `http://127.0.0.1:8000/api/health`.
 - Then access it from your laptop with `http://<pi-ip>:8000/api/health`.
+
+### Deployment topology — laptop backend + Pi visitor kiosk
+
+Recommended setup when the Raspberry Pi is too constrained to run the vision models:
+
+- **Laptop** runs the FastAPI backend *and* the owner dashboard.
+- **Raspberry Pi** runs *only* the visitor frontend, pointed at the laptop over the LAN.
+- Both are on the same WiFi.
+
+On the laptop:
+
+```sh
+./start-laptop.sh
+# Find the LAN IP to give the Pi:
+ipconfig getifaddr en0   # macOS
+# or:  hostname -I | awk '{print $1}'   # Linux
+```
+
+`start-laptop.sh` binds `uvicorn` to `0.0.0.0:8000` so the Pi can reach it. Open the owner dashboard locally at `http://localhost:8080/` after starting the frontend with `npm run dev` in another terminal.
+
+On the Raspberry Pi:
+
+```sh
+LAPTOP_IP=<the-laptop-ip> ./start-pi.sh
+```
+
+`start-pi.sh` exports `VITE_API_URL=http://<LAPTOP_IP>:8000` and starts Vite on `0.0.0.0:8080`. To boot the Pi straight into the visitor doorbell, point Chromium in kiosk mode at:
+
+```sh
+chromium-browser --kiosk http://localhost:8080/doorbell
+```
+
+The frontend's API resolver in [src/lib/api.ts](src/lib/api.ts) reads `VITE_API_URL` first, then falls back to `window.location.hostname:8000` — so leaving `VITE_API_URL` empty in `.env` works for both same-host and cross-device access.
+
+### Weapon detection: OpenThreatDetection
+
+Runtime weapon detection goes through [api/agents/openthreat_detector.py](api/agents/openthreat_detector.py), which loads weights from (in order):
+
+1. `OPENTHREAT_WEIGHTS_PATH` env var (operator override)
+2. `weapon_detection/openthreat/weights/best.pt` (the new home — see [weapon_detection/openthreat/README.md](weapon_detection/openthreat/README.md))
+3. `weapon_detection/runs/detect/Normal_Compressed/weights/best.pt` (legacy YOLO fallback)
+
+Drop the [IterateAI/OpenThreatDetection](https://github.com/IterateAI/OpenThreatDetection) `.pt` weights into option 2 to complete the swap. The legacy fallback keeps the system functional while you're sourcing the new weights.
+
+### Vacation Mode
+
+When the owner is away, toggle Vacation Mode from the dashboard header (the toggle next to "Logout"). Effects:
+
+- The dashboard shows a sticky amber banner confirming the mode is on. State is persisted per-owner in SQLite, so a refresh or reconnect doesn't disable surveillance.
+- The decision engine suppresses `auto_reply` and routes those interactions to `notify_owner` instead — escalation behaviour for weapons / scams / aggression is **unchanged**.
+- The live-frame pipeline emits a `person_detected` WebSocket event to the `owner` channel on every confirmed person presence (two consecutive frames, 30-second cooldown). The payload carries a captured JPEG, a one-line scene description from `IntelligenceAgent.summarise_perception`, and a session ID. Each alert is also persisted as an `actions` row of type `vacation_person_alert`.
+
+API surface:
+
+```sh
+# Read current settings
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/owner/settings
+# {"vacation_mode": false}
+
+# Turn Vacation Mode on
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"vacation_mode": true}' \
+  http://127.0.0.1:8000/api/owner/settings
+```
 
 ### 5. Frontend Setup
 
@@ -189,7 +263,9 @@ These are only needed if Groq API is unavailable (offline fallback).
 | `POST` | `/api/auth/register` | Register a new owner account |
 | `POST` | `/api/auth/login` | Login and get auth token |
 | `POST` | `/api/auth/logout` | Invalidate token |
-| `GET` | `/api/auth/me` | Get current user |
+| `GET` | `/api/auth/me` | Get current user (incl. `vacation_mode`) |
+| `GET` | `/api/owner/settings` | Read owner settings (`vacation_mode`) |
+| `PUT` | `/api/owner/settings` | Update owner settings (e.g. toggle Vacation Mode) |
 | `POST` | `/api/ring` | Ring the doorbell (image + audio → full pipeline) |
 | `POST` | `/api/transcribe` | Transcribe audio (Groq Whisper STT) |
 | `POST` | `/api/tts` | Generate TTS audio (Hindi/English auto-detect) |
@@ -418,9 +494,12 @@ npm run preview
 │   ├── logs/                      # Agent logs
 │   ├── members/                   # Member photos
 │   └── tmp/                       # Temporary session files
-├── models/                        # VOSK STT models (offline)
+├── models/                        # VOSK STT models (offline, gitignored)
 ├── weapon_detection/              # Custom weapon detection model
-├── .env                           # API keys (not committed)
+├── .env.example                   # Env template (tracked — copy to .env)
+├── .env                           # API keys (gitignored — never commit)
 ├── package.json                   # Node dependencies
 └── api/requirements.txt           # Python dependencies
 ```
+
+> Internal reports and planning docs (`*REPORT*.md`, `CURRENT_IMPLEMENTED_SYSTEM.md`, `IMPLEMENTATION_PLAN.md`, `plan.md`, etc.) are git-ignored and kept for local reference only.

@@ -39,8 +39,18 @@ class Orchestrator:
 
         self.perception_agent = PerceptionAgent()
         self.intelligence_agent = IntelligenceAgent()
-        self.decision_agent = DecisionAgent()
+        # DecisionAgent reads vacation_mode from the live owner record on every
+        # decision, so toggling Vacation Mode in the dashboard takes effect for
+        # the very next ring without a server restart.
+        self.decision_agent = DecisionAgent(owner_provider=self._current_owner_record)
         self.action_agent = ActionAgent(db=self.db)
+
+    def _current_owner_record(self) -> dict | None:
+        """Return the single registered owner — single-household assumption."""
+        try:
+            return self.db.get_default_owner()
+        except Exception:
+            return None
 
     def initialize(self) -> None:
         self.db.initialize()
@@ -350,6 +360,7 @@ class Orchestrator:
                 "objects": [obj.model_dump() for obj in perception.objects],
                 "weapon_detected": perception.weapon_detected,
                 "weapon_confidence": perception.weapon_confidence,
+                "weapon_labels": list(getattr(perception, "weapon_labels", []) or []),
                 "num_persons": getattr(perception, "num_persons", 0),
                 "face_visible": getattr(perception, "face_visible", True),
                 "context_flags": getattr(perception, "context_flags", []),

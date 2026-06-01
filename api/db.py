@@ -30,6 +30,17 @@ class Database:
         conn.execute("PRAGMA foreign_keys = ON;")
         return conn
 
+    def _column_exists(self, table: str, column: str) -> bool:
+        with closing(self._connect()) as conn:
+            rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            return any(r["name"] == column for r in rows)
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        if not self._column_exists(table, column):
+            with closing(self._connect()) as conn:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+                conn.commit()
+
     def initialize(self) -> None:
         with closing(self._connect()) as conn:
             conn.execute(
@@ -117,6 +128,8 @@ class Database:
                 """
             )
             conn.commit()
+
+        self._ensure_column("owners", "vacation_mode", "INTEGER DEFAULT 0")
 
     def create_session(self, session_id: str, created_at: str, device_id: str, status: str = "queued") -> None:
         with closing(self._connect()) as conn:
@@ -305,10 +318,58 @@ class Database:
     def verify_token(self, token: str) -> dict | None:
         with closing(self._connect()) as conn:
             row = conn.execute(
-                "SELECT o.id, o.username, o.name FROM tokens t JOIN owners o ON t.owner_id = o.id WHERE t.token = ?",
+                "SELECT o.id, o.username, o.name, o.vacation_mode "
+                "FROM tokens t JOIN owners o ON t.owner_id = o.id WHERE t.token = ?",
                 (token,),
             ).fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            owner = dict(row)
+            owner["vacation_mode"] = bool(owner.get("vacation_mode"))
+            return owner
+
+    def get_owner_by_id(self, owner_id: int) -> dict | None:
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT id, username, name, vacation_mode FROM owners WHERE id = ?",
+                (owner_id,),
+            ).fetchone()
+            if not row:
+                return None
+            owner = dict(row)
+            owner["vacation_mode"] = bool(owner.get("vacation_mode"))
+            return owner
+
+    def get_default_owner(self) -> dict | None:
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT id, username, name, vacation_mode FROM owners ORDER BY id ASC LIMIT 1",
+            ).fetchone()
+            if not row:
+                return None
+            owner = dict(row)
+            owner["vacation_mode"] = bool(owner.get("vacation_mode"))
+            return owner
+
+    def get_owner_settings(self, owner_id: int) -> dict:
+        owner = self.get_owner_by_id(owner_id)
+        if not owner:
+            return {"vacation_mode": False}
+        return {"vacation_mode": bool(owner.get("vacation_mode"))}
+
+    def set_owner_setting(self, owner_id: int, key: str, value) -> bool:
+        allowed = {"vacation_mode"}
+        if key not in allowed:
+            return False
+        if key == "vacation_mode":
+            value = 1 if value else 0
+        with closing(self._connect()) as conn:
+            cur = conn.execute(
+                f"UPDATE owners SET {key} = ? WHERE id = ?",
+                (value, owner_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
 
     def delete_token(self, token: str) -> None:
         with closing(self._connect()) as conn:

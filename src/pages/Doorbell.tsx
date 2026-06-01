@@ -3,7 +3,7 @@ import Webcam from 'react-webcam';
 import { RingButton } from '@/components/RingButton';
 import { StatusIndicator } from '@/components/StatusIndicator';
 import { TranscriptDisplay } from '@/components/TranscriptDisplay';
-import { ringDoorbell, getAIReply, speakText, connectWebSocket, transcribeAudio } from '@/lib/api';
+import { ringDoorbell, getAIReply, speakText, connectWebSocket, transcribeAudio, API_BASE_URL } from '@/lib/api';
 import { Home, Mic, MicOff, Camera, CameraOff, Maximize, Minimize } from 'lucide-react';
 
 type DoorbellState = 'idle' | 'ringing' | 'greeting' | 'awaiting_input' | 'processing' | 'speaking';
@@ -15,7 +15,6 @@ interface TranscriptEntry {
 }
 
 const STREAM_FRAME_INTERVAL = 200; // ms between frames (5 FPS)
-const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
 export default function Doorbell() {
   const [state, setState] = useState<DoorbellState>('idle');

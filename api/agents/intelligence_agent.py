@@ -163,6 +163,41 @@ class IntelligenceAgent(BaseAgent):
         )
 
     # ------------------------------------------------------------------
+    # Lightweight scene summary (used by vacation-mode person alerts).
+    # No LLM round-trip — must be near-instant.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def summarise_perception(perception: PerceptionOutput) -> str:
+        n = perception.num_persons or (1 if perception.person_detected else 0)
+        if n <= 0:
+            base = "No person clearly visible in frame"
+        elif n == 1:
+            base = "1 person at the door"
+        else:
+            base = f"{n} people at the door"
+
+        notable: list[str] = []
+        for obj in (perception.objects or [])[:6]:
+            label = (obj.label or "").lower()
+            if label in {"person", ""}:
+                continue
+            notable.append(label)
+            if len(notable) == 2:
+                break
+
+        parts = [base]
+        if notable:
+            parts.append(f"carrying {', '.join(notable)}")
+        if perception.weapon_detected:
+            parts.append("WEAPON DETECTED")
+        if not perception.face_visible:
+            parts.append("face not visible")
+        if perception.emotion and perception.emotion != "neutral":
+            parts.append(f"{perception.emotion} tone")
+        return ", ".join(parts) + "."
+
+    # ------------------------------------------------------------------
     # Main processing pipeline
     # ------------------------------------------------------------------
 

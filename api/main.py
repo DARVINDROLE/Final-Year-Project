@@ -16,7 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .models import AiReplyRequest, RingEvent
+from .agents.intelligence_agent import IntelligenceAgent
+from .models import AiReplyRequest, ObjectDetection, PerceptionOutput, RingEvent
 from .orchestrator import Orchestrator
 
 load_dotenv()
@@ -162,6 +163,8 @@ async def _inactivity_checker_loop() -> None:
                 _last_weapon_scan.pop(sid, None)
                 _weapon_alert_sent.pop(sid, None)
                 _weapon_hit_streak.pop(sid, None)
+                _person_hit_streak.pop(sid, None)
+                _last_person_alert.pop(sid, None)
 
         except Exception as exc:
             logger.error("Inactivity checker error: %s", exc)
@@ -211,6 +214,42 @@ async def logout(authorization: Optional[str] = Header(None)) -> dict:
 async def auth_me(authorization: Optional[str] = Header(None)) -> dict:
     owner = _require_auth(authorization)
     return {"user": owner}
+
+
+# ══════════════════════════════════════════════════════════════
+# Owner settings (Vacation Mode and friends)
+# ══════════════════════════════════════════════════════════════
+
+class OwnerSettingsUpdate(BaseModel):
+    vacation_mode: Optional[bool] = None
+
+
+@app.get("/api/owner/settings")
+async def get_owner_settings(authorization: Optional[str] = Header(None)) -> dict:
+    owner = _require_auth(authorization)
+    return _get_db().get_owner_settings(owner["id"])
+
+
+@app.put("/api/owner/settings")
+async def update_owner_settings(
+    req: OwnerSettingsUpdate, authorization: Optional[str] = Header(None)
+) -> dict:
+    owner = _require_auth(authorization)
+    db = _get_db()
+    if req.vacation_mode is not None:
+        db.set_owner_setting(owner["id"], "vacation_mode", req.vacation_mode)
+        try:
+            db.add_action(
+                session_id="",
+                action_type="owner_setting_changed",
+                payload={"key": "vacation_mode", "value": bool(req.vacation_mode)},
+                status="done",
+                short_reason=f"vacation_mode={'on' if req.vacation_mode else 'off'}",
+                agent_name="owner",
+            )
+        except Exception:
+            pass
+    return db.get_owner_settings(owner["id"])
 
 
 # ══════════════════════════════════════════════════════════════
@@ -374,13 +413,24 @@ async def session_detail(session_id: str) -> dict:
 @app.post("/api/ai-reply")
 async def ai_reply(payload: AiReplyRequest) -> dict:
     result = await app.state.orchestrator.handle_ai_reply(payload)
-    # Broadcast the reply to any WebSocket listeners on the session
     reply_text = result.get("reply", payload.message)
+    event_type = "ai_reply" if not payload.owner else "owner_reply"
+    session_payload = {
+        "type": event_type,
+        "message": reply_text,
+        "sessionId": payload.session_id,
+    }
+    # Tell the visitor's session channel so the doorbell page can render the reply.
+    asyncio.create_task(ws_manager.broadcast(payload.session_id, session_payload))
+    # Also poke the owner channel so the dashboard refreshes its visitor card —
+    # otherwise the owner only sees the AI's first reply until they manually refresh.
     asyncio.create_task(
-        ws_manager.broadcast(payload.session_id, {
-            "type": "ai_reply" if not payload.owner else "owner_reply",
-            "message": reply_text,
+        ws_manager.broadcast("owner", {
+            "type": "transcript_updated",
             "sessionId": payload.session_id,
+            "role": "owner" if payload.owner else "visitor",
+            "message": payload.message,
+            "reply": reply_text,
         })
     )
     return result
@@ -395,6 +445,14 @@ async def owner_reply(payload: AiReplyRequest) -> dict:
             "type": "owner_reply",
             "message": payload.message,
             "sessionId": payload.session_id,
+        })
+    )
+    asyncio.create_task(
+        ws_manager.broadcast("owner", {
+            "type": "transcript_updated",
+            "sessionId": payload.session_id,
+            "role": "owner",
+            "message": payload.message,
         })
     )
     return result
@@ -421,13 +479,22 @@ _active_sessions: set[str] = set()          # sessions currently streaming frame
 _last_person_seen: dict[str, float] = {}    # last time a person was detected per session
 _last_person_scan: dict[str, float] = {}    # rate-limiter for person detection
 
-# Rate-limit weapon detection: run at most once per WEAPON_DETECT_INTERVAL seconds
-WEAPON_DETECT_INTERVAL = 0.4   # seconds — scan ~2.5 times per second
-WEAPON_CONF_THRESHOLD = 0.55   # confidence cutoff to avoid false positives
+# Rate-limit weapon detection: run at most once per WEAPON_DETECT_INTERVAL seconds.
+# OpenThreatDetection (YOLOv4 SavedModel @ 608x608) on CPU is ~1-2s/frame on
+# Apple Silicon, so we space scans further apart than the legacy YOLOv8 model.
+WEAPON_DETECT_INTERVAL = 1.5   # seconds — scan ~once every 1.5 s
+WEAPON_DETECT_TIMEOUT = 8      # seconds — max time for a single TF inference
+WEAPON_CONF_THRESHOLD = 0.35   # tuned for OpenThreatDetection (upstream default 0.30)
 WEAPON_CONSECUTIVE_HITS = 2    # require N consecutive positive frames before alerting
 _last_weapon_scan: dict[str, float] = {}
 _weapon_alert_sent: dict[str, bool] = {}  # avoid spamming alerts
 _weapon_hit_streak: dict[str, int] = {}   # consecutive positive detections per session
+
+# ── Vacation Mode person-alert state ───────────────────────
+PERSON_ALERT_CONSECUTIVE_HITS = 2   # match weapon-alert hysteresis
+PERSON_ALERT_COOLDOWN = 30.0        # seconds between vacation alerts per session
+_person_hit_streak: dict[str, int] = {}
+_last_person_alert: dict[str, float] = {}
 
 
 def _decode_frame_to_numpy(frame_bytes: bytes):
@@ -475,52 +542,94 @@ def _run_person_detection_on_frame(frame_bytes: bytes) -> bool:
 
 
 def _run_weapon_detection_on_frame(frame_bytes: bytes) -> dict:
-    """Run the perception agent's weapon model on raw JPEG bytes.
-    Decodes in-memory (no disk I/O) and passes a numpy array to YOLO.
+    """Run the perception agent's OpenThreatDetector on raw JPEG bytes.
+    Decodes in-memory (no disk I/O) and delegates to the adapter.
     Returns {weapon_detected, weapon_confidence, weapon_labels}."""
     perception = app.state.orchestrator.perception_agent
-    if perception.weapon_model is None:
+    detector = perception.weapon_model
+    if detector is None:
         return {"weapon_detected": False, "weapon_confidence": 0.0, "weapon_labels": []}
+    img = _decode_frame_to_numpy(frame_bytes)
+    if img is None:
+        return {"weapon_detected": False, "weapon_confidence": 0.0, "weapon_labels": []}
+    return detector.detect_from_array(img, conf=WEAPON_CONF_THRESHOLD)
+
+
+def _is_owner_on_vacation() -> bool:
+    """Single-household owner lookup. Returns False if no owner is registered."""
+    try:
+        owner = app.state.orchestrator.db.get_default_owner()
+        return bool(owner and owner.get("vacation_mode"))
+    except Exception:
+        return False
+
+
+async def _emit_vacation_person_alert(
+    session_id: str,
+    frame_data: bytes,
+    weapon_result: dict | None,
+    now: float,
+) -> None:
+    """Persist a snapshot, build a one-line description, broadcast to the owner
+    channel, and log an action row. Failures are swallowed — the alert is
+    best-effort and must never break the streaming endpoint."""
+    timestamp = datetime.now(timezone.utc).isoformat()
+    snaps_dir = Path("data/snaps")
+    snaps_dir.mkdir(parents=True, exist_ok=True)
+    image_filename = f"{session_id}_vacation_{int(now)}.jpg"
+    image_path = snaps_dir / image_filename
+    try:
+        image_path.write_bytes(frame_data)
+    except Exception as exc:
+        logger.debug("Vacation alert: failed to persist frame: %s", exc)
+
+    weapon_detected = bool(weapon_result and weapon_result.get("weapon_detected"))
+    weapon_labels = list(weapon_result.get("weapon_labels", [])) if weapon_result else []
+    objects: list[ObjectDetection] = [ObjectDetection(label=lbl, conf=1.0) for lbl in weapon_labels]
+
+    perception_stub = PerceptionOutput(
+        session_id=session_id,
+        person_detected=True,
+        objects=objects,
+        weapon_detected=weapon_detected,
+        weapon_labels=weapon_labels,
+        num_persons=1,
+        face_visible=True,
+        emotion="neutral",
+    )
+    description = IntelligenceAgent.summarise_perception(perception_stub)
+
+    payload = {
+        "type": "person_detected",
+        "sessionId": session_id,
+        "imageUrl": f"/static/snaps/{image_filename}",
+        "description": description,
+        "timestamp": timestamp,
+        "weapon_detected": weapon_detected,
+        "num_persons": 1,
+    }
+    try:
+        await ws_manager.broadcast("owner", payload)
+        await ws_manager.broadcast(session_id, payload)
+    except Exception as exc:
+        logger.debug("Vacation alert: broadcast failed: %s", exc)
 
     try:
-        img = _decode_frame_to_numpy(frame_bytes)
-        if img is None:
-            return {"weapon_detected": False, "weapon_confidence": 0.0, "weapon_labels": []}
-
-        # Run YOLO on numpy array directly (skips disk read)
-        results = perception.weapon_model.predict(
-            source=img,
-            imgsz=640,
-            conf=WEAPON_CONF_THRESHOLD,
-            device="cpu",
-            half=False,
-            verbose=False,
+        app.state.orchestrator.db.add_action(
+            session_id=session_id,
+            action_type="vacation_person_alert",
+            payload={
+                "image_path": str(image_path),
+                "description": description,
+                "weapon_detected": weapon_detected,
+                "weapon_labels": weapon_labels,
+            },
+            status="sent",
+            short_reason="Person detected during vacation mode",
+            agent_name="perception_agent",
         )
-        detected = False
-        top_confidence = 0.0
-        labels: list[str] = []
-        for result in results:
-            boxes = getattr(result, "boxes", None)
-            if boxes is None or boxes.conf is None:
-                continue
-            for idx in range(len(boxes.conf)):
-                confidence = float(boxes.conf[idx])
-                if confidence < WEAPON_CONF_THRESHOLD:
-                    continue
-                class_id = int(boxes.cls[idx])
-                label = str(result.names[class_id])
-                detected = True
-                top_confidence = max(top_confidence, confidence)
-                labels.append(label)
-
-        return {
-            "weapon_detected": detected,
-            "weapon_confidence": top_confidence,
-            "weapon_labels": labels,
-        }
     except Exception as exc:
-        logger.debug("Weapon detection on frame failed: %s", exc)
-        return {"weapon_detected": False, "weapon_confidence": 0.0, "weapon_labels": []}
+        logger.debug("Vacation alert: DB log failed: %s", exc)
 
 
 @app.post("/api/session/{session_id}/stream-frame")
@@ -547,15 +656,18 @@ async def stream_frame(session_id: str, request: Request) -> dict:
             _last_person_seen[session_id] = now
 
         # ── Periodic person-presence detection ─────────────────────
+        person_found_this_scan = False
+        person_scan_ran = False
         last_pscan = _last_person_scan.get(session_id, 0.0)
         if (now - last_pscan) >= PERSON_DETECT_INTERVAL:
             _last_person_scan[session_id] = now
+            person_scan_ran = True
             try:
-                person_found = await asyncio.wait_for(
+                person_found_this_scan = await asyncio.wait_for(
                     asyncio.to_thread(_run_person_detection_on_frame, frame_data),
                     timeout=3,
                 )
-                if person_found:
+                if person_found_this_scan:
                     _last_person_seen[session_id] = now
             except Exception as exc:
                 logger.debug("Person detection scan failed: %s", exc)
@@ -567,10 +679,20 @@ async def stream_frame(session_id: str, request: Request) -> dict:
             try:
                 weapon_result = await asyncio.wait_for(
                     asyncio.to_thread(_run_weapon_detection_on_frame, frame_data),
-                    timeout=3,
+                    timeout=WEAPON_DETECT_TIMEOUT,
+                )
+                # Visible at INFO so you can confirm the live scan is actually running
+                # and see what conf/labels the model returned per frame.
+                logger.info(
+                    "Live weapon scan [%s]: detected=%s conf=%.3f labels=%s",
+                    session_id,
+                    weapon_result.get("weapon_detected"),
+                    weapon_result.get("weapon_confidence", 0.0),
+                    weapon_result.get("weapon_labels", []),
                 )
             except Exception as exc:
-                logger.debug("Live weapon scan failed: %s", exc)
+                # Bumped from debug→warning so silent failures aren't swallowed.
+                logger.warning("Live weapon scan failed [%s]: %s", session_id, exc)
 
         # Track consecutive detections to avoid false positives
         if weapon_result:
@@ -578,6 +700,24 @@ async def stream_frame(session_id: str, request: Request) -> dict:
                 _weapon_hit_streak[session_id] = _weapon_hit_streak.get(session_id, 0) + 1
             else:
                 _weapon_hit_streak[session_id] = 0  # reset on a clean frame
+
+        # ── Vacation-mode person alert ─────────────────────────────
+        # Fires once per confirmed person presence, independent of the weapon
+        # alert path. Cooldown prevents spamming the owner during one visit.
+        if person_scan_ran and _is_owner_on_vacation():
+            if person_found_this_scan:
+                _person_hit_streak[session_id] = _person_hit_streak.get(session_id, 0) + 1
+            else:
+                _person_hit_streak[session_id] = 0
+            p_streak = _person_hit_streak.get(session_id, 0)
+            last_alert = _last_person_alert.get(session_id, 0.0)
+            if (
+                person_found_this_scan
+                and p_streak >= PERSON_ALERT_CONSECUTIVE_HITS
+                and (now - last_alert) >= PERSON_ALERT_COOLDOWN
+            ):
+                _last_person_alert[session_id] = now
+                await _emit_vacation_person_alert(session_id, frame_data, weapon_result, now)
 
         streak = _weapon_hit_streak.get(session_id, 0)
         # Only alert after WEAPON_CONSECUTIVE_HITS consecutive positive frames

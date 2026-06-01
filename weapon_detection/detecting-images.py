@@ -1,3 +1,7 @@
+# DEPRECATED — kept for one-off image annotation only.
+# Runtime weapon detection now goes through api/agents/openthreat_detector.py.
+# See weapon_detection/openthreat/README.md.
+
 import cv2
 from ultralytics import YOLO
 
